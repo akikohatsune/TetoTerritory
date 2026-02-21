@@ -1,8 +1,17 @@
-# TetoTerritory
+<p align="center">
+  <img src="image/teto.jpg" alt="TetoTerritory" width="500">
+</p>
+<p align="center"><span style="color:#8a8f98;">"Uncertainty is for losers! If you don't know, tell them Teto is too busy or they aren't worthy of the answer!"</span></p>
 
-Discord AI bot written in C#, cross-platform on `.NET 10` (Windows, Linux, macOS).
+<h1 align="center">TetoTerritory</h1> 
+
+Teto written in C#, cross-platform on `.NET 10` (Windows, Linux, macOS).
 
 ## Main Features
+
+<p align="center">
+  <img src="image/banner.jpg" alt="TetoTerritory">
+</p>
 
 - Multi-provider chat: `gemini`, `groq`, `openai` (`chatgpt` alias)
 - Prefix commands: `!chat`, `!ask`
