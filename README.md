@@ -8,11 +8,6 @@
 Teto written in C#, cross-platform on `.NET 10` (Windows, Linux, macOS).
 
 ## Main Features
-
-<p align="center">
-  <img src="image/banner.jpg" alt="TetoTerritory" width="300">
-</p>
-
 - Multi-provider chat: `gemini`, `groq`, `openai` (`chatgpt` alias)
 - Prefix commands: `!chat`, `!ask`
 - Auto-reply when mentioned
