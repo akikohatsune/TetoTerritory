@@ -48,7 +48,7 @@ cp .env.example .env
 cp system_rules_example.json system_rules.json
 ```
 
-PowerShell:
+If you using PowerShell:
 
 ```powershell
 Copy-Item .env.example .env
