@@ -1,44 +1,74 @@
-# TetoTerritory C# (.NET 10)
+# TetoTerritory
 
-This is a C# port of the original Python bot, targeting `net10.0` for cross-platform runtime on:
-- Windows
-- Linux
-- macOS
+Discord AI bot viết bằng C#, chạy đa nền tảng với `.NET 10` (Windows, Linux, macOS).
 
-## Features ported
+## Tinh nang chinh
 
-- Multi-provider chat: `gemini`, `groq`, `openai` (`chatgpt` alias)
-- Prefix chat commands: `!chat`, `!ask`
-- Mention auto-reply
-- Short-term memory in SQLite
-- Ban control commands: `!ban`, `!removeban` (owner only)
-- Call-name commands: `!ucallteto`, `!tetocallu`, `!tetomention`
-- Replay logger commands: `!replayteto ls`, `!replayteto <id>`, `!replayteto<id>` (owner only)
-- RPC presence settings
-- Terminated mode: `!terminated on|off|status`
+- Chat da provider: `gemini`, `groq`, `openai` (`chatgpt` alias)
+- Prefix commands: `!chat`, `!ask`
+- Tu dong tra loi khi duoc mention
+- Memory ngan han theo channel (SQLite)
+- Ban control: `!ban`, `!removeban` (chi owner)
+- Call-name profile:
+  - `!ucallteto <name>` / `!callteto <name>`
+  - `!tetocallu <name>` / `!callme <name>`
+  - `!tetomention` / `!callprofile`
+- Replay logs:
+  - `!replayteto ls`
+  - `!replayteto <id>`
+  - `!replayteto<id>` (inline)
+- Runtime controls: `!clearmemo`, `!resetchat`, `!terminated on|off|status`, `!provider`
+- Slash command: `/tetomodel` (xem provider/model hien tai)
+- RPC presence config qua env
 
-## Setup
+## Yeu cau
+
+- `.NET SDK 10`
+- Discord bot token (`DISCORD_TOKEN`)
+- API key theo provider:
+  - Gemini: `GEMINI_API_KEY`
+  - Groq: `GROQ_API_KEY`
+  - OpenAI: `OPENAI_API_KEY`
+- Trong Discord Developer Portal: bat `MESSAGE CONTENT INTENT`
+
+## Cai dat
 
 ```bash
 cd TetoTerritory
 cp .env.example .env
+cp system_rules_example.json system_rules.json
 ```
 
-Edit `.env`, then run:
+Neu dung PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Sua file `.env` roi chay:
 
 ```bash
 dotnet restore
 dotnet run
 ```
 
-Run tests:
+## Chay test
 
 ```bash
 dotnet test ../TetoTerritory.CSharp.Tests/TetoTerritory.CSharp.Tests.csproj
 ```
 
-## Notes
+## Bien moi truong quan trong
 
-- `BOT_OWNER_USER_ID` is optional but recommended for owner-only commands.
-- If `BOT_OWNER_USER_ID` is empty, the bot attempts to resolve owner from Discord application info on startup.
-- Paths in `.env` are resolved from `TetoTerritory/` working directory.
+- `COMMAND_PREFIX` (mac dinh `!`)
+- `BOT_OWNER_USER_ID` (khuyen nghi set de dung owner commands on dinh)
+- `LLM_PROVIDER` (`gemini|groq|openai|chatgpt`)
+- `SYSTEM_PROMPT`, `SYSTEM_RULES_JSON`
+- `CHAT_MEMORY_DB_PATH`, `BAN_DB_PATH`, `CALLNAMES_DB_PATH` (mac dinh trong `data/`)
+- `CHAT_REPLAY_LOG_PATH`
+- `RPC_ENABLED`, `RPC_STATUS`, `RPC_ACTIVITY_TYPE`, `RPC_ACTIVITY_NAME`, `RPC_ACTIVITY_URL`
+
+## Luu y
+
+- Neu `BOT_OWNER_USER_ID` bo trong, bot se thu tu resolve owner tu Discord application info luc startup.
+- Tat ca duong dan trong `.env` duoc resolve theo working directory `TetoTerritory/`.

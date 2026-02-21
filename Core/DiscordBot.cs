@@ -2,6 +2,7 @@ using Discord;
 using Discord.WebSocket;
 using TetoTerritory.CSharp.Commands;
 using TetoTerritory.CSharp.Logging;
+using TetoTerritory.CSharp.SlashCommands;
 using TetoTerritory.CSharp.Storage;
 
 namespace TetoTerritory.CSharp.Core;
@@ -23,6 +24,7 @@ public sealed class DiscordBot : IAsyncDisposable
     private readonly ChatReplayLogger _replayLogger;
     private readonly CommandParser _commandParser;
     private readonly DiscordCommandDispatcher _commandDispatcher;
+    private readonly SlashCommandDispatcher _slashCommandDispatcher;
 
     private CancellationTokenSource? _runCts;
     private Task? _cleanupTask;
@@ -59,6 +61,11 @@ public sealed class DiscordBot : IAsyncDisposable
                 new BanCommandHandler(),
                 new CallNamesCommandHandler(),
             });
+        _slashCommandDispatcher = new SlashCommandDispatcher(
+            new ISlashCommandHandler[]
+            {
+                new TetoModelSlashCommandHandler(),
+            });
 
         _ownerUserId = settings.BotOwnerUserId;
     }
@@ -81,6 +88,7 @@ public sealed class DiscordBot : IAsyncDisposable
         _client.Log += OnLogAsync;
         _client.Ready += OnReadyAsync;
         _client.MessageReceived += OnMessageReceivedAsync;
+        _client.SlashCommandExecuted += OnSlashCommandExecutedAsync;
 
         await _client.LoginAsync(TokenType.Bot, _settings.DiscordToken);
         await _client.StartAsync();
@@ -322,6 +330,15 @@ public sealed class DiscordBot : IAsyncDisposable
             $"Terminated: `{_terminated}`";
     }
 
+    internal string BuildModelStatusMessage()
+    {
+        return
+            $"Current provider: `{_settings.Provider}` | " +
+            $"Current model: `{ActiveChatModel()}` | " +
+            "Approval provider: `gemini` | " +
+            $"Approval model: `{_settings.GeminiApprovalModel}`";
+    }
+
     internal Task<bool> BanUserAsync(ulong guildId, ulong userId, ulong bannedBy, string? reason)
     {
         return _banStore.BanUserAsync(guildId, userId, bannedBy, reason);
@@ -460,6 +477,7 @@ public sealed class DiscordBot : IAsyncDisposable
     private async Task OnReadyAsync()
     {
         await ApplyRpcPresenceAsync();
+        await RegisterSlashCommandsAsync();
 
         try
         {
@@ -487,6 +505,11 @@ public sealed class DiscordBot : IAsyncDisposable
         Console.WriteLine($"Image max bytes: {_settings.ImageMaxBytes}");
         Console.WriteLine($"Max reply chars: {_settings.MaxReplyChars}");
         Console.WriteLine($"Bot owner ID: {_ownerUserId?.ToString() ?? "(unknown)"}");
+    }
+
+    private async Task OnSlashCommandExecutedAsync(SocketSlashCommand command)
+    {
+        await _slashCommandDispatcher.TryHandleAsync(this, command);
     }
 
     private async Task OnMessageReceivedAsync(SocketMessage rawMessage)
@@ -760,6 +783,23 @@ public sealed class DiscordBot : IAsyncDisposable
             {
                 Console.WriteLine($"Shutdown warning: {ex.Message}");
             }
+        }
+    }
+
+    private async Task RegisterSlashCommandsAsync()
+    {
+        try
+        {
+            var commands = _slashCommandDispatcher.BuildGlobalCommands();
+            await _client.BulkOverwriteGlobalApplicationCommandsAsync(commands);
+
+            var commandNames = _slashCommandDispatcher.GetCommandNames();
+            var display = string.Join(", ", commandNames.Select(name => $"/{name}"));
+            Console.WriteLine($"Registered slash commands: {display}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to register slash commands: {ex.Message}");
         }
     }
 }

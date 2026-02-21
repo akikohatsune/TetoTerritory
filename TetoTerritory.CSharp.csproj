@@ -10,4 +10,9 @@
     <PackageReference Include="Discord.Net" Version="3.18.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="TetoTerritory.CSharp.Tests\**\*.cs" />
+    <None Remove="TetoTerritory.CSharp.Tests\**\*" />
+  </ItemGroup>
 </Project>

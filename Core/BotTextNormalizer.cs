@@ -9,6 +9,7 @@ public static class BotTextNormalizer
     private static readonly Regex EveryoneMentionPattern = new("@everyone", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex HereMentionPattern = new("@here", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex FencedJsonPattern = new("^```(?:json)?\\s*(.*?)\\s*```$", RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex AnswerPropertyPattern = new("\"answer\"\\s*:\\s*\"(?<value>(?:\\\\.|[^\"\\\\])*)\"", RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex HasLatexPattern = new(@"(?:\$\$|\$|\\\(|\\\)|\\\[|\\\]|\\[a-zA-Z]+)", RegexOptions.Compiled);
 
     public static string SanitizeMentions(string text)
@@ -40,6 +41,23 @@ public static class BotTextNormalizer
             candidate = fenced.Groups[1].Value.Trim();
         }
 
+        candidate = NormalizeSmartQuotes(candidate);
+        if (TryExtractAnswerFromJsonObject(candidate, out var answerFromJson))
+        {
+            return answerFromJson;
+        }
+
+        if (TryExtractAnswerFromAnswerProperty(candidate, out var answerFromProperty))
+        {
+            return answerFromProperty;
+        }
+
+        return null;
+    }
+
+    private static bool TryExtractAnswerFromJsonObject(string candidate, out string? answer)
+    {
+        answer = null;
         var bytes = Encoding.UTF8.GetBytes(candidate);
         for (var i = 0; i < bytes.Length; i++)
         {
@@ -66,10 +84,10 @@ public static class BotTextNormalizer
                     if (doc.RootElement.TryGetProperty("answer", out var answerProp) &&
                         answerProp.ValueKind == JsonValueKind.String)
                     {
-                        var answer = answerProp.GetString()?.Trim();
+                        answer = answerProp.GetString()?.Trim();
                         if (!string.IsNullOrWhiteSpace(answer))
                         {
-                            return answer;
+                            return true;
                         }
                     }
                 }
@@ -79,7 +97,54 @@ public static class BotTextNormalizer
             }
         }
 
-        return null;
+        return false;
+    }
+
+    private static bool TryExtractAnswerFromAnswerProperty(string candidate, out string? answer)
+    {
+        answer = null;
+        var match = AnswerPropertyPattern.Match(candidate);
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        var encodedValue = match.Groups["value"].Value;
+        try
+        {
+            var decoded = JsonSerializer.Deserialize<string>($"\"{encodedValue}\"");
+            if (!string.IsNullOrWhiteSpace(decoded))
+            {
+                answer = decoded.Trim();
+                return true;
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        var fallback = encodedValue
+            .Replace("\\n", "\n", StringComparison.Ordinal)
+            .Replace("\\r", "\r", StringComparison.Ordinal)
+            .Replace("\\t", "\t", StringComparison.Ordinal)
+            .Replace("\\\"", "\"", StringComparison.Ordinal)
+            .Trim();
+        if (fallback.Length == 0)
+        {
+            return false;
+        }
+
+        answer = fallback;
+        return true;
+    }
+
+    private static string NormalizeSmartQuotes(string text)
+    {
+        return text
+            .Replace('\u201c', '"')
+            .Replace('\u201d', '"')
+            .Replace('\u2018', '\'')
+            .Replace('\u2019', '\'');
     }
 
     public static string LatexToPlainMath(string text)

@@ -70,7 +70,7 @@ public sealed class Settings
             ? baseSystemPrompt
             : $"{baseSystemPrompt}\n\n{rulesPrompt}";
 
-        var legacyMemoryDbPath = GetEnvString("MEMORY_DB_PATH", "chat_memory.db");
+        var legacyMemoryDbPath = GetEnvString("MEMORY_DB_PATH", "data/chat_memory.db");
         var geminiModel = GetEnvString("GEMINI_MODEL", DefaultGeminiModel);
         var geminiApprovalModel = GetEnvString("GEMINI_APPROVAL_MODEL", DefaultGeminiApprovalModel);
         var groqModel = GetEnvString("GROQ_MODEL", "llama-3.3-70b-versatile");
@@ -173,8 +173,8 @@ public sealed class Settings
             SystemRulesJson = systemRulesJson,
             ChatReplayLogPath = GetEnvString("CHAT_REPLAY_LOG_PATH", "logger/chat_replay.jsonl"),
             ChatMemoryDbPath = GetEnvString("CHAT_MEMORY_DB_PATH", legacyMemoryDbPath),
-            BanDbPath = GetEnvString("BAN_DB_PATH", "ban_control.db"),
-            CallnamesDbPath = GetEnvString("CALLNAMES_DB_PATH", "callnames.db"),
+            BanDbPath = GetEnvString("BAN_DB_PATH", "data/ban_control.db"),
+            CallnamesDbPath = GetEnvString("CALLNAMES_DB_PATH", "data/callnames.db"),
             MemoryIdleTtlSeconds = GetEnvInt("MEMORY_IDLE_TTL_SECONDS", 300, minimum: 0),
             ImageMaxBytes = GetEnvInt("IMAGE_MAX_BYTES", 5 * 1024 * 1024, minimum: 1),
             MaxReplyChars = GetEnvInt("MAX_REPLY_CHARS", 1800, minimum: 100),

@@ -56,3 +56,8 @@ publish/
 
 # Ignore environment variable files
 .env
+
+# Ignore local SQLite runtime data
+data/*.db
+data/*.db-wal
+data/*.db-shm
