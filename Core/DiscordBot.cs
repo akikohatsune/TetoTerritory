@@ -30,6 +30,7 @@ public sealed class DiscordBot : IAsyncDisposable
     private Task? _cleanupTask;
     private bool _terminated;
     private ulong? _ownerUserId;
+    private int _readyInitializationStarted;
     private bool _disposed;
 
     public DiscordBot(Settings settings)
@@ -64,6 +65,21 @@ public sealed class DiscordBot : IAsyncDisposable
         _slashCommandDispatcher = new SlashCommandDispatcher(
             new ISlashCommandHandler[]
             {
+                new ChatSlashCommandHandler("chat"),
+                new ChatSlashCommandHandler("ask"),
+                new ClearMemorySlashCommandHandler("clearmemo"),
+                new ClearMemorySlashCommandHandler("resetchat"),
+                new TerminatedSlashCommandHandler(),
+                new ProviderSlashCommandHandler(),
+                new ReplaySlashCommandHandler(),
+                new BanSlashCommandHandler(),
+                new RemoveBanSlashCommandHandler(),
+                new UserCallsTetoSlashCommandHandler("ucallteto"),
+                new UserCallsTetoSlashCommandHandler("callteto"),
+                new TetoCallsUserSlashCommandHandler("tetocallu"),
+                new TetoCallsUserSlashCommandHandler("callme"),
+                new CallProfileSlashCommandHandler("tetomention"),
+                new CallProfileSlashCommandHandler("callprofile"),
                 new TetoModelSlashCommandHandler(),
             });
 
@@ -164,6 +180,16 @@ public sealed class DiscordBot : IAsyncDisposable
         return await _banStore.IsUserBannedAsync(guildId.Value, message.Author.Id);
     }
 
+    internal async Task<bool> IsBannedAsync(ulong? guildId, ulong userId)
+    {
+        if (!guildId.HasValue)
+        {
+            return false;
+        }
+
+        return await _banStore.IsUserBannedAsync(guildId.Value, userId);
+    }
+
     internal async Task<bool> EnsureOwnerPermissionAsync(SocketUserMessage message)
     {
         if (GetGuildId(message) is null)
@@ -181,6 +207,23 @@ public sealed class DiscordBot : IAsyncDisposable
         return true;
     }
 
+    internal async Task<bool> EnsureOwnerPermissionAsync(SocketSlashCommand command)
+    {
+        if (GetGuildId(command) is null)
+        {
+            await RespondSlashAsync(command, "This command can only be used in a server.", ephemeral: true);
+            return false;
+        }
+
+        if (!IsOwner(command.User))
+        {
+            await RespondSlashAsync(command, "Only the bot owner can use this command.", ephemeral: true);
+            return false;
+        }
+
+        return true;
+    }
+
     internal bool IsOwner(SocketUser user)
     {
         return _ownerUserId.HasValue && user.Id == _ownerUserId.Value;
@@ -189,6 +232,13 @@ public sealed class DiscordBot : IAsyncDisposable
     internal ulong? GetGuildId(SocketUserMessage message)
     {
         return message.Channel is SocketGuildChannel guildChannel
+            ? guildChannel.Guild.Id
+            : null;
+    }
+
+    internal ulong? GetGuildId(SocketSlashCommand command)
+    {
+        return command.Channel is SocketGuildChannel guildChannel
             ? guildChannel.Guild.Id
             : null;
     }
@@ -309,6 +359,78 @@ public sealed class DiscordBot : IAsyncDisposable
         await SendLongMessageAsync(sourceMessage, reply);
     }
 
+    internal async Task RunChatAndReplyAsync(
+        SocketSlashCommand sourceCommand,
+        string prompt,
+        string fallbackPrompt,
+        string trigger)
+    {
+        if (!sourceCommand.HasResponded)
+        {
+            await sourceCommand.DeferAsync();
+        }
+
+        var effectivePrompt = NormalizePrompt(prompt, fallbackPrompt);
+
+        string reply;
+        var imageCount = 0;
+        try
+        {
+            var guildId = GetGuildId(sourceCommand);
+            var promptForLlm = await ApplyCallPreferencesToPromptAsync(
+                effectivePrompt,
+                guildId: guildId,
+                userId: sourceCommand.User.Id);
+
+            var history = await _chatMemory.GetHistoryAsync(sourceCommand.Channel.Id);
+            var llmMessages = new List<ChatMessage>(history.Count + 1);
+            llmMessages.AddRange(history.Select(h => new ChatMessage
+            {
+                Role = h.Role,
+                Content = h.Content,
+            }));
+            llmMessages.Add(new ChatMessage
+            {
+                Role = "user",
+                Content = promptForLlm,
+                Images = new List<ImageInput>(),
+            });
+
+            var rawReply = await _llmClient.GenerateAsync(llmMessages);
+            reply = BotTextNormalizer.NormalizeModelReply(rawReply);
+        }
+        catch (Exception ex)
+        {
+            await RespondSlashAsync(sourceCommand, $"Error while calling AI: `{ex.Message}`", ephemeral: true);
+            return;
+        }
+
+        await _chatMemory.AppendMessageAsync(
+            sourceCommand.Channel.Id,
+            "user",
+            MemoryUserEntry(effectivePrompt, imageCount));
+        await _chatMemory.AppendMessageAsync(
+            sourceCommand.Channel.Id,
+            "assistant",
+            reply);
+
+        await _replayLogger.LogChatAsync(
+            guildId: GetGuildId(sourceCommand),
+            guildName: GetGuildName(sourceCommand),
+            channelId: sourceCommand.Channel.Id,
+            channelName: GetChannelName(sourceCommand),
+            userId: sourceCommand.User.Id,
+            userName: sourceCommand.User.Username,
+            userDisplay: sourceCommand.User is SocketGuildUser guildUser
+                ? guildUser.DisplayName
+                : sourceCommand.User.Username,
+            trigger: trigger,
+            prompt: effectivePrompt,
+            replyLength: reply.Length);
+
+        await SendLongSlashMessageAsync(sourceCommand, reply);
+    }
+
     internal Task ClearChannelMemoryAsync(ulong channelId)
     {
         return _chatMemory.ClearChannelAsync(channelId);
@@ -330,13 +452,9 @@ public sealed class DiscordBot : IAsyncDisposable
             $"Terminated: `{_terminated}`";
     }
 
-    internal string BuildModelStatusMessage()
+    internal string CurrentModelName()
     {
-        return
-            $"Current provider: `{_settings.Provider}` | " +
-            $"Current model: `{ActiveChatModel()}` | " +
-            "Approval provider: `gemini` | " +
-            $"Approval model: `{_settings.GeminiApprovalModel}`";
+        return ActiveChatModel();
     }
 
     internal Task<bool> BanUserAsync(ulong guildId, ulong userId, ulong bannedBy, string? reason)
@@ -369,6 +487,19 @@ public sealed class DiscordBot : IAsyncDisposable
             "Current call profile | " +
             $"You call Teto: `{userCallsTeto ?? "Teto"}` | " +
             $"Teto calls you: `{tetoCallsUser ?? display}`");
+    }
+
+    internal async Task ShowCallProfileAsync(SocketSlashCommand command)
+    {
+        var guildId = GetGuildId(command) ?? 0;
+        var (userCallsTeto, tetoCallsUser) = await _callNamesStore.GetUserCallPreferencesAsync(guildId, command.User.Id);
+        var display = command.User is SocketGuildUser guildUser ? guildUser.DisplayName : command.User.Username;
+        await RespondSlashAsync(
+            command,
+            "Current call profile | " +
+            $"You call Teto: `{userCallsTeto ?? "Teto"}` | " +
+            $"Teto calls you: `{tetoCallsUser ?? display}`",
+            ephemeral: true);
     }
 
     internal async Task SetCallNameWithApprovalAsync(
@@ -413,6 +544,50 @@ public sealed class DiscordBot : IAsyncDisposable
         var guildId = GetGuildId(message) ?? 0;
         await saveAsync(guildId, message.Author.Id, value, CancellationToken.None);
         await ReplyAsync(message, string.Format(successMessage, value));
+    }
+
+    internal async Task SetCallNameWithApprovalAsync(
+        SocketSlashCommand command,
+        string rawName,
+        string fieldName,
+        string successMessage,
+        Func<ulong, ulong, string, CancellationToken, Task> saveAsync)
+    {
+        var value = NormalizeCallName(rawName);
+        if (value is null)
+        {
+            if (string.IsNullOrWhiteSpace(rawName))
+            {
+                await RespondSlashAsync(command, "Name cannot be empty.", ephemeral: true);
+            }
+            else
+            {
+                await RespondSlashAsync(command, $"Name is too long (max {MaxCallNameLength} characters).", ephemeral: true);
+            }
+
+            return;
+        }
+
+        bool approved;
+        try
+        {
+            approved = await _llmClient.ApproveCallNameAsync(fieldName, value);
+        }
+        catch (Exception ex)
+        {
+            await RespondSlashAsync(command, $"Unable to run call-name approval right now: `{ex.Message}`", ephemeral: true);
+            return;
+        }
+
+        if (!approved)
+        {
+            await RespondSlashAsync(command, "Call-name was rejected by approval (`no`).", ephemeral: true);
+            return;
+        }
+
+        var guildId = GetGuildId(command) ?? 0;
+        await saveAsync(guildId, command.User.Id, value, CancellationToken.None);
+        await RespondSlashAsync(command, string.Format(successMessage, value), ephemeral: true);
     }
 
     internal async Task<string> BuildReplayPayloadAsync(string action, ulong? guildId)
@@ -474,42 +649,64 @@ public sealed class DiscordBot : IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    private async Task OnReadyAsync()
+    private Task OnReadyAsync()
     {
-        await ApplyRpcPresenceAsync();
-        await RegisterSlashCommandsAsync();
+        if (Interlocked.Exchange(ref _readyInitializationStarted, 1) == 1)
+        {
+            return Task.CompletedTask;
+        }
 
+        _ = Task.Run(InitializeAfterReadyAsync);
+        return Task.CompletedTask;
+    }
+
+    private async Task InitializeAfterReadyAsync()
+    {
         try
         {
-            var appInfo = await _client.GetApplicationInfoAsync();
-            _ownerUserId = appInfo.Owner?.Id ?? _ownerUserId;
+            await ApplyRpcPresenceAsync();
+            await RegisterSlashCommandsAsync();
+
+            try
+            {
+                var appInfo = await _client.GetApplicationInfoAsync();
+                _ownerUserId = appInfo.Owner?.Id ?? _ownerUserId;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to resolve owner via application info: {ex.Message}");
+            }
+
+            var user = _client.CurrentUser;
+            var userId = user?.Id.ToString() ?? "unknown";
+            Console.WriteLine($"Logged in as {user} (ID: {userId})");
+            Console.WriteLine($"Provider: {_settings.Provider}");
+            Console.WriteLine($"Model: {ActiveChatModel()}");
+            Console.WriteLine("Approval provider: gemini (fixed)");
+            Console.WriteLine($"Approval model: {_settings.GeminiApprovalModel}");
+            Console.WriteLine($"System rules JSON: {_settings.SystemRulesJson}");
+            Console.WriteLine($"Chat replay log: {_settings.ChatReplayLogPath}");
+            Console.WriteLine($"Chat memory DB: {_settings.ChatMemoryDbPath}");
+            Console.WriteLine($"Ban DB: {_settings.BanDbPath}");
+            Console.WriteLine($"Callnames DB: {_settings.CallnamesDbPath}");
+            Console.WriteLine($"Memory idle TTL: {_settings.MemoryIdleTtlSeconds}s");
+            Console.WriteLine($"Image max bytes: {_settings.ImageMaxBytes}");
+            Console.WriteLine($"Max reply chars: {_settings.MaxReplyChars}");
+            Console.WriteLine($"Bot owner ID: {_ownerUserId?.ToString() ?? "(unknown)"}");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to resolve owner via application info: {ex.Message}");
+            Console.WriteLine($"Ready initialization error: {ex.Message}");
         }
-
-        var user = _client.CurrentUser;
-        var userId = user?.Id.ToString() ?? "unknown";
-        Console.WriteLine($"Logged in as {user} (ID: {userId})");
-        Console.WriteLine($"Provider: {_settings.Provider}");
-        Console.WriteLine($"Model: {ActiveChatModel()}");
-        Console.WriteLine("Approval provider: gemini (fixed)");
-        Console.WriteLine($"Approval model: {_settings.GeminiApprovalModel}");
-        Console.WriteLine($"System rules JSON: {_settings.SystemRulesJson}");
-        Console.WriteLine($"Chat replay log: {_settings.ChatReplayLogPath}");
-        Console.WriteLine($"Chat memory DB: {_settings.ChatMemoryDbPath}");
-        Console.WriteLine($"Ban DB: {_settings.BanDbPath}");
-        Console.WriteLine($"Callnames DB: {_settings.CallnamesDbPath}");
-        Console.WriteLine($"Memory idle TTL: {_settings.MemoryIdleTtlSeconds}s");
-        Console.WriteLine($"Image max bytes: {_settings.ImageMaxBytes}");
-        Console.WriteLine($"Max reply chars: {_settings.MaxReplyChars}");
-        Console.WriteLine($"Bot owner ID: {_ownerUserId?.ToString() ?? "(unknown)"}");
     }
 
     private async Task OnSlashCommandExecutedAsync(SocketSlashCommand command)
     {
-        await _slashCommandDispatcher.TryHandleAsync(this, command);
+        var handled = await _slashCommandDispatcher.TryHandleAsync(this, command);
+        if (!handled)
+        {
+            await RespondSlashAsync(command, "This slash command is not configured in the current runtime.", ephemeral: true);
+        }
     }
 
     private async Task OnMessageReceivedAsync(SocketMessage rawMessage)
@@ -674,9 +871,21 @@ public sealed class DiscordBot : IAsyncDisposable
             : null;
     }
 
+    private static string? GetGuildName(SocketSlashCommand command)
+    {
+        return command.Channel is SocketGuildChannel guildChannel
+            ? guildChannel.Guild.Name
+            : null;
+    }
+
     private static string? GetChannelName(SocketUserMessage message)
     {
         return message.Channel.Name;
+    }
+
+    private static string? GetChannelName(SocketSlashCommand command)
+    {
+        return command.Channel.Name;
     }
 
     private string ActiveChatModel()
@@ -782,6 +991,64 @@ public sealed class DiscordBot : IAsyncDisposable
             catch (Exception ex)
             {
                 Console.WriteLine($"Shutdown warning: {ex.Message}");
+            }
+        }
+    }
+
+    internal async Task RespondSlashAsync(SocketSlashCommand command, string text, bool ephemeral = false)
+    {
+        var safeText = BotTextNormalizer.SanitizeMentions(text);
+        if (!command.HasResponded)
+        {
+            await command.RespondAsync(
+                text: safeText,
+                allowedMentions: AllowedMentions.None,
+                ephemeral: ephemeral);
+            return;
+        }
+
+        await command.FollowupAsync(
+            text: safeText,
+            allowedMentions: AllowedMentions.None,
+            ephemeral: ephemeral);
+    }
+
+    internal async Task SendLongSlashMessageAsync(SocketSlashCommand command, string text, bool ephemeral = false)
+    {
+        var safeText = BotTextNormalizer.SanitizeMentions(text);
+        var maxLen = Math.Min(1900, _settings.MaxReplyChars);
+        if (maxLen < 1)
+        {
+            maxLen = 1;
+        }
+
+        var chunks = new List<string>();
+        for (var i = 0; i < safeText.Length; i += maxLen)
+        {
+            var len = Math.Min(maxLen, safeText.Length - i);
+            chunks.Add(safeText.Substring(i, len));
+        }
+
+        if (chunks.Count == 0)
+        {
+            chunks.Add("(no content)");
+        }
+
+        for (var idx = 0; idx < chunks.Count; idx++)
+        {
+            if (idx == 0 && !command.HasResponded)
+            {
+                await command.RespondAsync(
+                    text: chunks[idx],
+                    allowedMentions: AllowedMentions.None,
+                    ephemeral: ephemeral);
+            }
+            else
+            {
+                await command.FollowupAsync(
+                    text: chunks[idx],
+                    allowedMentions: AllowedMentions.None,
+                    ephemeral: ephemeral);
             }
         }
     }

@@ -17,8 +17,14 @@ internal sealed class TetoModelSlashCommandHandler : ISlashCommandHandler
 
     public Task HandleAsync(DiscordBot bot, SocketSlashCommand command)
     {
+        var embed = new EmbedBuilder()
+            .WithTitle("Teto Model")
+            .WithDescription($"Current model: `{bot.CurrentModelName()}`")
+            .WithColor(Color.Magenta)
+            .Build();
+
         return command.RespondAsync(
-            text: bot.BuildModelStatusMessage(),
+            embed: embed,
             ephemeral: true);
     }
 }

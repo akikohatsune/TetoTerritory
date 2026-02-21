@@ -18,7 +18,13 @@ Discord AI bot written in C#, cross-platform on `.NET 10` (Windows, Linux, macOS
   - `!replayteto <id>`
   - `!replayteto<id>` (inline)
 - Runtime controls: `!clearmemo`, `!resetchat`, `!terminated on|off|status`, `!provider`
-- Slash command: `/tetomodel` (show current provider/model)
+- Slash commands (in addition to prefix commands):
+  - `/chat`, `/ask`
+  - `/provider`, `/tetomodel`
+  - `/clearmemo`, `/resetchat`, `/terminated`
+  - `/replayteto` (owner only)
+  - `/ban`, `/removeban` (owner only)
+  - `/ucallteto`, `/callteto`, `/tetocallu`, `/callme`, `/tetomention`, `/callprofile`
 - RPC presence configuration via env vars
 
 ## Requirements
