@@ -23,6 +23,15 @@ internal sealed class SlashCommandDispatcher
             .ToArray();
     }
 
+    public IReadOnlyList<(string Name, ApplicationCommandProperties Command)> BuildGlobalCommandRegistrations()
+    {
+        return _handlers.Values
+            .Select(h => (
+                Name: h.CommandName,
+                Command: (ApplicationCommandProperties)h.BuildCommand().Build()))
+            .ToArray();
+    }
+
     public IReadOnlyList<string> GetCommandNames()
     {
         return _handlers.Keys

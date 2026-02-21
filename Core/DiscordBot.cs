@@ -790,12 +790,38 @@ public sealed class DiscordBot : IAsyncDisposable
     {
         try
         {
-            var commands = _slashCommandDispatcher.BuildGlobalCommands();
-            await _client.BulkOverwriteGlobalApplicationCommandsAsync(commands);
+            var existing = await _client.GetGlobalApplicationCommandsAsync();
+            var existingNames = existing
+                .Select(cmd => cmd.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            var commandNames = _slashCommandDispatcher.GetCommandNames();
-            var display = string.Join(", ", commandNames.Select(name => $"/{name}"));
-            Console.WriteLine($"Registered slash commands: {display}");
+            var registrations = _slashCommandDispatcher.BuildGlobalCommandRegistrations();
+            var created = new List<string>();
+            var alreadyExists = new List<string>();
+
+            foreach (var registration in registrations)
+            {
+                if (existingNames.Contains(registration.Name))
+                {
+                    alreadyExists.Add(registration.Name);
+                    continue;
+                }
+
+                await _client.CreateGlobalApplicationCommandAsync(registration.Command);
+                created.Add(registration.Name);
+            }
+
+            if (created.Count > 0)
+            {
+                var createdDisplay = string.Join(", ", created.Select(name => $"/{name}"));
+                Console.WriteLine($"Registered new slash commands: {createdDisplay}");
+            }
+
+            if (alreadyExists.Count > 0)
+            {
+                var existsDisplay = string.Join(", ", alreadyExists.Select(name => $"/{name}"));
+                Console.WriteLine($"Slash commands already exist (kept): {existsDisplay}");
+            }
         }
         catch (Exception ex)
         {
