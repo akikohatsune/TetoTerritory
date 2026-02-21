@@ -1,0 +1,58 @@
+# Ignore Visual Studio temporary files, build results, and
+bin/
+obj/
+
+# Ignore Visual Studio Code workspace settings
+.vscode/settings.json
+.vscode/tasks.json
+.vscode/
+
+# Ignore user-specific files
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Ignore NuGet packages
+*.nupkg
+packages/  
+
+# Ignore Resharper files
+_ReSharper*/
+*.ReSharper
+*.DotSettings.user
+
+# Ignore Rider files
+.idea/  
+*.sln.iml
+
+# Ignore test results
+TestResults/
+
+# Ignore publish output
+publish/
+
+# Ignore logs
+*.log
+
+# Ignore other files 
+*.vspscc
+*.vssscc
+*.cache
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.VC.opendb
+*.scc
+*.dbmdl
+*.bak
+*.backup
+*.log
+*.vsix
+*.vsixmanifest
+*.vsixlangpack
+*.vsixlayout
+
+# Ignore environment variable files
+.env
