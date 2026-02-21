@@ -1,5 +1,7 @@
 using Discord;
 using Discord.WebSocket;
+using System.Net;
+using System.Reflection;
 using TetoTerritory.CSharp.Commands;
 using TetoTerritory.CSharp.Logging;
 using TetoTerritory.CSharp.SlashCommands;
@@ -22,6 +24,8 @@ public sealed class DiscordBot : IAsyncDisposable
     private readonly BanStore _banStore;
     private readonly CallNamesStore _callNamesStore;
     private readonly ChatReplayLogger _replayLogger;
+    private readonly object? _mikuFearInteraction;
+    private readonly MethodInfo? _mikuFearTryHandleAsyncMethod;
     private readonly CommandParser _commandParser;
     private readonly DiscordCommandDispatcher _commandDispatcher;
     private readonly SlashCommandDispatcher _slashCommandDispatcher;
@@ -53,6 +57,7 @@ public sealed class DiscordBot : IAsyncDisposable
         _banStore = new BanStore(settings.BanDbPath);
         _callNamesStore = new CallNamesStore(settings.CallnamesDbPath);
         _replayLogger = new ChatReplayLogger(settings.ChatReplayLogPath);
+        (_mikuFearInteraction, _mikuFearTryHandleAsyncMethod) = CreateOptionalMikuFearModule();
         _commandParser = new CommandParser(settings.CommandPrefix);
         _commandDispatcher = new DiscordCommandDispatcher(
             new IDiscordCommandHandler[]
@@ -245,10 +250,24 @@ public sealed class DiscordBot : IAsyncDisposable
 
     internal async Task ReplyAsync(SocketUserMessage sourceMessage, string text)
     {
-        await sourceMessage.Channel.SendMessageAsync(
-            text: text,
-            allowedMentions: AllowedMentions.None,
-            messageReference: new MessageReference(sourceMessage.Id));
+        var messageReference = new MessageReference(
+            messageId: sourceMessage.Id,
+            channelId: sourceMessage.Channel.Id,
+            guildId: GetGuildId(sourceMessage),
+            failIfNotExists: false);
+
+        try
+        {
+            await sourceMessage.Channel.SendMessageAsync(
+                text: text,
+                allowedMentions: AllowedMentions.None,
+                messageReference: messageReference);
+        }
+        catch (Discord.Net.HttpException ex) when (ShouldRetryReplyWithoutReference(ex))
+        {
+            // Intentionally stay silent when the source message no longer exists.
+            return;
+        }
     }
 
     internal async Task SendLongMessageAsync(SocketUserMessage sourceMessage, string text)
@@ -643,6 +662,106 @@ public sealed class DiscordBot : IAsyncDisposable
             entry.Prompt.Length == 0 ? "(empty)" : entry.Prompt);
     }
 
+    private (object? Instance, MethodInfo? TryHandleAsyncMethod) CreateOptionalMikuFearModule()
+    {
+        const string moduleTypeName = "TetoTerritory.CSharp.Core.MikuFearInteractionModule";
+        try
+        {
+            var moduleType = GetType().Assembly.GetType(moduleTypeName, throwOnError: false);
+            if (moduleType is null)
+            {
+                Console.WriteLine("Optional hook disabled: MikuFearInteractionModule not found.");
+                return (null, null);
+            }
+
+            var instance = Activator.CreateInstance(moduleType);
+            if (instance is null)
+            {
+                Console.WriteLine("Optional hook disabled: cannot create MikuFearInteractionModule instance.");
+                return (null, null);
+            }
+
+            var tryHandleAsyncMethod = moduleType.GetMethod(
+                "TryHandleAsync",
+                BindingFlags.Instance | BindingFlags.Public,
+                binder: null,
+                types:
+                [
+                    typeof(DiscordBot),
+                    typeof(SocketUserMessage),
+                    typeof(ulong?),
+                    typeof(CancellationToken),
+                ],
+                modifiers: null);
+
+            if (tryHandleAsyncMethod is null)
+            {
+                Console.WriteLine("Optional hook disabled: MikuFearInteractionModule.TryHandleAsync signature mismatch.");
+                return (null, null);
+            }
+
+            Console.WriteLine("Optional hook enabled: MikuFearInteractionModule");
+            return (instance, tryHandleAsyncMethod);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Optional hook disabled: cannot load MikuFearInteractionModule ({ex.Message})");
+            return (null, null);
+        }
+    }
+
+    private async Task<bool> TryRunOptionalMikuFearHookAsync(
+        SocketUserMessage message,
+        CancellationToken cancellationToken = default)
+    {
+        if (_mikuFearInteraction is null || _mikuFearTryHandleAsyncMethod is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var result = _mikuFearTryHandleAsyncMethod.Invoke(
+                _mikuFearInteraction,
+                new object?[]
+                {
+                    this,
+                    message,
+                    _client.CurrentUser?.Id,
+                    cancellationToken,
+                });
+
+            if (result is Task<bool> taskBool)
+            {
+                return await taskBool;
+            }
+
+            if (result is Task task)
+            {
+                await task;
+                return false;
+            }
+
+            if (result is bool boolResult)
+            {
+                return boolResult;
+            }
+
+            return false;
+        }
+        catch (TargetInvocationException ex)
+        {
+            var detail = ex.InnerException?.Message ?? ex.Message;
+            Console.WriteLine($"Optional hook error (MikuFearInteractionModule): {detail}");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Optional hook error (MikuFearInteractionModule): {ex.Message}");
+            return false;
+        }
+    }
+
     private Task OnLogAsync(LogMessage log)
     {
         Console.WriteLine(log.ToString());
@@ -712,6 +831,12 @@ public sealed class DiscordBot : IAsyncDisposable
     private async Task OnMessageReceivedAsync(SocketMessage rawMessage)
     {
         if (rawMessage is not SocketUserMessage message)
+        {
+            return;
+        }
+
+        var hookHandled = await TryRunOptionalMikuFearHookAsync(message);
+        if (hookHandled)
         {
             return;
         }
@@ -886,6 +1011,23 @@ public sealed class DiscordBot : IAsyncDisposable
     private static string? GetChannelName(SocketSlashCommand command)
     {
         return command.Channel.Name;
+    }
+
+    private static bool ShouldRetryReplyWithoutReference(Discord.Net.HttpException ex)
+    {
+        if (ex.DiscordCode == DiscordErrorCode.UnknownMessage)
+        {
+            return true;
+        }
+
+        if (ex.HttpCode is HttpStatusCode.BadRequest or HttpStatusCode.NotFound)
+        {
+            return true;
+        }
+
+        var detail = ex.Message ?? string.Empty;
+        return detail.Contains("10008", StringComparison.Ordinal) ||
+               detail.Contains("Unknown Message", StringComparison.OrdinalIgnoreCase);
     }
 
     private string ActiveChatModel()
