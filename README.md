@@ -20,7 +20,7 @@ This is a C# port of the original Python bot, targeting `net10.0` for cross-plat
 ## Setup
 
 ```bash
-cd TetoTerritory.CSharp
+cd TetoTerritory
 cp .env.example .env
 ```
 
@@ -41,4 +41,4 @@ dotnet test ../TetoTerritory.CSharp.Tests/TetoTerritory.CSharp.Tests.csproj
 
 - `BOT_OWNER_USER_ID` is optional but recommended for owner-only commands.
 - If `BOT_OWNER_USER_ID` is empty, the bot attempts to resolve owner from Discord application info on startup.
-- Paths in `.env` are resolved from `TetoTerritory.CSharp/` working directory.
+- Paths in `.env` are resolved from `TetoTerritory/` working directory.
