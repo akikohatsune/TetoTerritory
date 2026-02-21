@@ -50,6 +50,17 @@ public sealed class BotTextNormalizerTests
     }
 
     [Fact]
+    public void NormalizeModelReply_HandlesKeyValueStructuredOutput()
+    {
+        var input =
+            "style: discord_form_v1\n" +
+            "answer: NICE TRY, GIF-GHOST!\n" +
+            "confidence: 1.0";
+        var output = BotTextNormalizer.NormalizeModelReply(input);
+        Assert.Equal("NICE TRY, GIF-GHOST!", output);
+    }
+
+    [Fact]
     public void LatexToPlainMath_ConvertsCommonForms()
     {
         var input = @"Result: \frac{1}{2} and \sqrt{9} and x \neq y";

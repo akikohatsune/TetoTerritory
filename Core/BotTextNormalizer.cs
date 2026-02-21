@@ -6,10 +6,17 @@ namespace TetoTerritory.CSharp.Core;
 
 public static class BotTextNormalizer
 {
+    private static readonly HashSet<string> StructuredKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "style",
+        "answer",
+        "confidence",
+    };
     private static readonly Regex EveryoneMentionPattern = new("@everyone", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex HereMentionPattern = new("@here", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex FencedJsonPattern = new("^```(?:json)?\\s*(.*?)\\s*```$", RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex AnswerPropertyPattern = new("\"answer\"\\s*:\\s*\"(?<value>(?:\\\\.|[^\"\\\\])*)\"", RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex KeyValueLinePattern = new("^\\s*(?<key>[a-zA-Z_][a-zA-Z0-9_\\-]*)\\s*:\\s*(?<value>.*)$", RegexOptions.Compiled);
     private static readonly Regex HasLatexPattern = new(@"(?:\$\$|\$|\\\(|\\\)|\\\[|\\\]|\\[a-zA-Z]+)", RegexOptions.Compiled);
 
     public static string SanitizeMentions(string text)
@@ -50,6 +57,11 @@ public static class BotTextNormalizer
         if (TryExtractAnswerFromAnswerProperty(candidate, out var answerFromProperty))
         {
             return answerFromProperty;
+        }
+
+        if (TryExtractAnswerFromKeyValueBlock(candidate, out var answerFromKeyValue))
+        {
+            return answerFromKeyValue;
         }
 
         return null;
@@ -145,6 +157,95 @@ public static class BotTextNormalizer
             .Replace('\u201d', '"')
             .Replace('\u2018', '\'')
             .Replace('\u2019', '\'');
+    }
+
+    private static bool TryExtractAnswerFromKeyValueBlock(string candidate, out string? answer)
+    {
+        answer = null;
+        var normalized = candidate.Replace("\r\n", "\n", StringComparison.Ordinal);
+        var lines = normalized.Split('\n');
+
+        var hasStructuredShape = false;
+        foreach (var rawLine in lines)
+        {
+            var match = KeyValueLinePattern.Match(rawLine);
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var key = match.Groups["key"].Value;
+            if (StructuredKeys.Contains(key))
+            {
+                hasStructuredShape = true;
+                break;
+            }
+        }
+
+        if (!hasStructuredShape)
+        {
+            return false;
+        }
+
+        var collectingAnswer = false;
+        var buffer = new StringBuilder();
+        foreach (var rawLine in lines)
+        {
+            var match = KeyValueLinePattern.Match(rawLine);
+            if (match.Success)
+            {
+                var key = match.Groups["key"].Value;
+                var value = match.Groups["value"].Value.Trim();
+
+                if (collectingAnswer && !key.Equals("answer", StringComparison.OrdinalIgnoreCase) && StructuredKeys.Contains(key))
+                {
+                    break;
+                }
+
+                if (key.Equals("answer", StringComparison.OrdinalIgnoreCase))
+                {
+                    collectingAnswer = true;
+                    if (value.Length > 0)
+                    {
+                        if (buffer.Length > 0)
+                        {
+                            buffer.Append('\n');
+                        }
+
+                        buffer.Append(value);
+                    }
+
+                    continue;
+                }
+            }
+
+            if (!collectingAnswer)
+            {
+                continue;
+            }
+
+            var continuation = rawLine.Trim();
+            if (continuation.Length == 0)
+            {
+                continue;
+            }
+
+            if (buffer.Length > 0)
+            {
+                buffer.Append('\n');
+            }
+
+            buffer.Append(continuation);
+        }
+
+        var result = buffer.ToString().Trim();
+        if (result.Length == 0)
+        {
+            return false;
+        }
+
+        answer = result;
+        return true;
     }
 
     public static string LatexToPlainMath(string text)
