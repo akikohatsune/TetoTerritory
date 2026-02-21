@@ -82,3 +82,6 @@ dotnet test TetoTerritory.CSharp.Tests/TetoTerritory.CSharp.Tests.csproj
 
 - If `BOT_OWNER_USER_ID` is empty, the bot attempts to resolve owner from Discord application info at startup.
 - All paths in `.env` are resolved relative to the `TetoTerritory/` working directory.
+
+## License
+MIT License — see `LICENSE` for details.
