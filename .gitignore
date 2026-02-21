@@ -65,7 +65,7 @@ data/*.db-shm
 # Ignore chat replay logs
 chat_replay.jsonl
 chat_replay
-logger/ 
+logger/chat_replay.jsonl
 
 # Ignore
 system_rules.json
