@@ -45,14 +45,14 @@ Teto written in C#, cross-platform on `.NET 10` (Windows, Linux, macOS).
 
 ```bash
 cp .env.example .env
-cp system_rules_example.json system_rules.json
+cp system_rules_example.md system_rules.md
 ```
 
 If you using PowerShell:
 
 ```powershell
 Copy-Item .env.example .env
-Copy-Item system_rules_example.json system_rules.json
+Copy-Item system_rules_example.md system_rules.md
 ```
 
 Edit `.env`, then run:
@@ -73,7 +73,7 @@ dotnet test TetoTerritory.CSharp.Tests/TetoTerritory.CSharp.Tests.csproj
 - `COMMAND_PREFIX` (default: `!`)
 - `BOT_OWNER_USER_ID` (recommended for stable owner-only commands)
 - `LLM_PROVIDER` (`gemini|groq|openai|chatgpt`)
-- `SYSTEM_PROMPT`, `SYSTEM_RULES_JSON`
+- `SYSTEM_PROMPT`, `SYSTEM_RULES_PATH`
 - `CHAT_MEMORY_DB_PATH`, `BAN_DB_PATH`, `CALLNAMES_DB_PATH` (default under `data/`)
 - `CHAT_REPLAY_LOG_PATH`
 - `RPC_ENABLED`, `RPC_STATUS`, `RPC_ACTIVITY_TYPE`, `RPC_ACTIVITY_NAME`, `RPC_ACTIVITY_URL`

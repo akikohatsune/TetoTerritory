@@ -803,7 +803,7 @@ public sealed class DiscordBot : IAsyncDisposable
             Console.WriteLine($"Model: {ActiveChatModel()}");
             Console.WriteLine("Approval provider: gemini (fixed)");
             Console.WriteLine($"Approval model: {_settings.GeminiApprovalModel}");
-            Console.WriteLine($"System rules JSON: {_settings.SystemRulesJson}");
+            Console.WriteLine($"System rules path: {_settings.SystemRulesPath}");
             Console.WriteLine($"Chat replay log: {_settings.ChatReplayLogPath}");
             Console.WriteLine($"Chat memory DB: {_settings.ChatMemoryDbPath}");
             Console.WriteLine($"Ban DB: {_settings.BanDbPath}");

@@ -1,5 +1,5 @@
 using System.Globalization;
-using System.Text.Json;
+using System.Text;
 
 namespace TetoTerritory.CSharp.Core;
 
@@ -29,7 +29,7 @@ public sealed class Settings
     public required string OpenAiModel { get; init; }
 
     public required string SystemPrompt { get; init; }
-    public required string SystemRulesJson { get; init; }
+    public required string SystemRulesPath { get; init; }
     public required string ChatReplayLogPath { get; init; }
     public required string ChatMemoryDbPath { get; init; }
     public required string BanDbPath { get; init; }
@@ -64,8 +64,8 @@ public sealed class Settings
             "SYSTEM_PROMPT",
             "You are Teto, a playful AI assistant on Discord. Reply in the same language as the user's latest message. Keep a light, fun tone while staying helpful and respectful.");
 
-        var systemRulesJson = GetEnvString("SYSTEM_RULES_JSON", "system_rules.json");
-        var rulesPrompt = LoadSystemRulesPrompt(systemRulesJson);
+        var systemRulesPath = GetEnvString("SYSTEM_RULES_PATH", "system_rules.md");
+        var rulesPrompt = LoadSystemRulesPrompt(systemRulesPath);
         var fullSystemPrompt = string.IsNullOrWhiteSpace(rulesPrompt)
             ? baseSystemPrompt
             : $"{baseSystemPrompt}\n\n{rulesPrompt}";
@@ -170,7 +170,7 @@ public sealed class Settings
             OpenAiApiKey = openAiApiKey,
             OpenAiModel = openAiModel,
             SystemPrompt = fullSystemPrompt,
-            SystemRulesJson = systemRulesJson,
+            SystemRulesPath = systemRulesPath,
             ChatReplayLogPath = GetEnvString("CHAT_REPLAY_LOG_PATH", "logger/chat_replay.jsonl"),
             ChatMemoryDbPath = GetEnvString("CHAT_MEMORY_DB_PATH", legacyMemoryDbPath),
             BanDbPath = GetEnvString("BAN_DB_PATH", "data/ban_control.db"),
@@ -252,17 +252,10 @@ public sealed class Settings
             return string.Empty;
         }
 
-        JsonElement root;
+        string content;
         try
         {
-            using var doc = JsonDocument.Parse(File.ReadAllText(path));
-            root = doc.RootElement.Clone();
-        }
-        catch (JsonException ex)
-        {
-            throw new InvalidOperationException(
-                $"Invalid JSON in system rules file: {path}",
-                ex);
+            content = File.ReadAllText(path, Encoding.UTF8).Trim();
         }
         catch (IOException ex)
         {
@@ -271,28 +264,16 @@ public sealed class Settings
                 ex);
         }
 
-        if (root.ValueKind != JsonValueKind.Object)
-        {
-            throw new InvalidOperationException(
-                $"System rules JSON must be an object: {path}");
-        }
-
-        if (root.TryGetProperty("enabled", out var enabled) &&
-            enabled.ValueKind == JsonValueKind.False)
+        if (string.IsNullOrWhiteSpace(content))
         {
             return string.Empty;
         }
 
-        var pretty = JsonSerializer.Serialize(root, new JsonSerializerOptions
-        {
-            WriteIndented = true,
-        });
-
         return
-            "You must follow these extra system rules loaded from JSON.\n" +
-            "If response_form exists, obey it exactly.\n" +
+            "You must follow these extra system rules loaded from Markdown.\n" +
+            "Reply directly in plain text unless the user asks for another format.\n" +
             $"Rules source: {path}\n" +
-            "Rules JSON:\n" +
-            pretty;
+            "Rules Markdown:\n" +
+            content;
     }
 }

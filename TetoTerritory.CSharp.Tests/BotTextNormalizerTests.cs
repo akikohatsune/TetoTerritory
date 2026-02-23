@@ -18,46 +18,46 @@ public sealed class BotTextNormalizerTests
     }
 
     [Fact]
-    public void NormalizeModelReply_UsesAnswerFieldFromJsonFence()
+    public void NormalizeModelReply_DoesNotExtractAnswerFromJsonFence()
     {
         var input = "```json\n{\"answer\":\"final output\"}\n```";
         var output = BotTextNormalizer.NormalizeModelReply(input);
-        Assert.Equal("final output", output);
+        Assert.Equal(input, output);
     }
 
     [Fact]
-    public void ExtractAnswerFromStructuredOutput_HandlesLeadingText()
+    public void NormalizeModelReply_DoesNotExtractAnswerFromInlineJson()
     {
         var input = "notes {\"answer\":\"ok\"} trailing";
-        var output = BotTextNormalizer.ExtractAnswerFromStructuredOutput(input);
-        Assert.Equal("ok", output);
+        var output = BotTextNormalizer.NormalizeModelReply(input);
+        Assert.Equal(input, output);
     }
 
     [Fact]
-    public void NormalizeModelReply_HandlesSmartQuotesInStructuredOutput()
+    public void NormalizeModelReply_DoesNotExtractAnswerFromStructuredPayload()
     {
         var input = "{\u201cstyle\u201d:\u201cdiscord_form_v1\u201d,\u201canswer\u201d:\u201cLine 1\\nLine 2\u201d,\u201cconfidence\u201d:0.9}";
         var output = BotTextNormalizer.NormalizeModelReply(input);
-        Assert.Equal("Line 1\nLine 2", output);
+        Assert.Equal(input, output);
     }
 
     [Fact]
-    public void ExtractAnswerFromStructuredOutput_HandlesInvalidJsonWithAnswerField()
+    public void NormalizeModelReply_DoesNotExtractAnswerFromInvalidJson()
     {
         var input = "{\"style\":\"discord_form_v1\" \"answer\":\"ok\\nnext\"}";
-        var output = BotTextNormalizer.ExtractAnswerFromStructuredOutput(input);
-        Assert.Equal("ok\nnext", output);
+        var output = BotTextNormalizer.NormalizeModelReply(input);
+        Assert.Equal(input, output);
     }
 
     [Fact]
-    public void NormalizeModelReply_HandlesKeyValueStructuredOutput()
+    public void NormalizeModelReply_DoesNotExtractAnswerFromKeyValueFormat()
     {
         var input =
             "style: discord_form_v1\n" +
             "answer: NICE TRY, GIF-GHOST!\n" +
             "confidence: 1.0";
         var output = BotTextNormalizer.NormalizeModelReply(input);
-        Assert.Equal("NICE TRY, GIF-GHOST!", output);
+        Assert.Equal(input, output);
     }
 
     [Fact]
