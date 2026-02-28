@@ -43,8 +43,10 @@ public sealed class LlmClient : IDisposable
         {
             throw;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.Error.WriteLine(
+                $"[{DateTimeOffset.UtcNow:O}] [llm] provider={_settings.Provider} generate failed: {ex}");
             return OverloadFallbackMessage;
         }
     }
