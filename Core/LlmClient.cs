@@ -7,6 +7,8 @@ namespace TetoTerritory.CSharp.Core;
 
 public sealed class LlmClient : IDisposable
 {
+    private const string OverloadFallbackMessage = "i overload!";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -27,13 +29,24 @@ public sealed class LlmClient : IDisposable
 
     public async Task<string> GenerateAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken = default)
     {
-        return _settings.Provider switch
+        try
         {
-            "gemini" => await CallGeminiAsync(messages, cancellationToken),
-            "groq" => await CallGroqAsync(messages, cancellationToken),
-            "openai" => await CallOpenAiAsync(messages, cancellationToken),
-            _ => throw new InvalidOperationException($"Unsupported provider: {_settings.Provider}"),
-        };
+            return _settings.Provider switch
+            {
+                "gemini" => await CallGeminiAsync(messages, cancellationToken),
+                "groq" => await CallGroqAsync(messages, cancellationToken),
+                "openai" => await CallOpenAiAsync(messages, cancellationToken),
+                _ => throw new InvalidOperationException($"Unsupported provider: {_settings.Provider}"),
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return OverloadFallbackMessage;
+        }
     }
 
     public async Task<bool> ApproveCallNameAsync(string fieldName, string value, CancellationToken cancellationToken = default)
