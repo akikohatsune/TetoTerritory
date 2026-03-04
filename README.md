@@ -85,3 +85,5 @@ dotnet test TetoTerritory.CSharp.Tests/TetoTerritory.CSharp.Tests.csproj
 
 ## License
 MIT License — see `LICENSE` for details.
+
+wtf komifilter?

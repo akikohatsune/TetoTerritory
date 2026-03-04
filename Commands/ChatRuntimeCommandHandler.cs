@@ -31,6 +31,11 @@ internal sealed class ChatRuntimeCommandHandler : IDiscordCommandHandler
 
             case "clearmemo":
             case "resetchat":
+                if (!await bot.EnsureOwnerPermissionAsync(message))
+                {
+                    return;
+                }
+
                 await bot.ClearChannelMemoryAsync(message.Channel.Id);
                 await bot.ReplyAsync(message, "Cleared short-term memory for this channel.");
                 return;
