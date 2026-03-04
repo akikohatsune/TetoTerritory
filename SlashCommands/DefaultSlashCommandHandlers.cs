@@ -103,6 +103,11 @@ internal sealed class TerminatedSlashCommandHandler : ISlashCommandHandler
 
     public async Task HandleAsync(DiscordBot bot, SocketSlashCommand command)
     {
+        if (!await bot.EnsureOwnerPermissionAsync(command))
+        {
+            return;
+        }
+
         var action = SlashOptionReader.GetString(command, "action", fallback: "on")
             .Trim()
             .ToLowerInvariant();
