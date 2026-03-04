@@ -74,6 +74,11 @@ internal sealed class ChatRuntimeCommandHandler : IDiscordCommandHandler
 
     private static async Task HandleTerminatedAsync(DiscordBot bot, SocketUserMessage message, string args)
     {
+        if (!await bot.EnsureOwnerPermissionAsync(message))
+        {
+            return;
+        }
+
         var action = string.IsNullOrWhiteSpace(args) ? "on" : args.Trim().ToLowerInvariant();
         if (action is "on" or "1" or "true")
         {
