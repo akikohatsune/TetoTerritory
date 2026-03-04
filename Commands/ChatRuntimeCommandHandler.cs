@@ -9,6 +9,8 @@ internal sealed class ChatRuntimeCommandHandler : IDiscordCommandHandler
     {
         "chat",
         "ask",
+        "chat2",
+        "ask2",
         "clearmemo",
         "resetchat",
         "terminated",
@@ -26,25 +28,22 @@ internal sealed class ChatRuntimeCommandHandler : IDiscordCommandHandler
         {
             case "chat":
             case "ask":
-                if (await bot.IsBannedAsync(message))
-                {
-                    await bot.ReplyAsync(message, "You are banned from using the AI bot in this server.");
-                    return;
-                }
-
-                if (bot.IsTerminated)
-                {
-                    await bot.ReplyAsync(
-                        message,
-                        $"Bot is in terminated mode. Use `{bot.Settings.CommandPrefix}terminated off` to enable replies again.");
-                    return;
-                }
-
-                await bot.RunChatAndReplyAsync(
+                await HandleChatAsync(
+                    bot,
                     message,
-                    prompt: args,
-                    fallbackPrompt: DiscordBot.DefaultPrompt,
+                    args,
+                    persona: ChatPersona.Main,
                     trigger: "command");
+                return;
+
+            case "chat2":
+            case "ask2":
+                await HandleChatAsync(
+                    bot,
+                    message,
+                    args,
+                    persona: ChatPersona.Secondary,
+                    trigger: "command:persona2");
                 return;
 
             case "clearmemo":
@@ -61,6 +60,41 @@ internal sealed class ChatRuntimeCommandHandler : IDiscordCommandHandler
                 await bot.ReplyAsync(message, bot.BuildProviderStatusMessage());
                 return;
         }
+    }
+
+    private static async Task HandleChatAsync(
+        DiscordBot bot,
+        SocketUserMessage message,
+        string args,
+        ChatPersona persona,
+        string trigger)
+    {
+        if (!bot.IsPersonaEnabled(persona))
+        {
+            await bot.ReplyAsync(message, "Persona2 is disabled. Configure PERSONA2_* settings first.");
+            return;
+        }
+
+        if (await bot.IsBannedAsync(message))
+        {
+            await bot.ReplyAsync(message, "You are banned from using the AI bot in this server.");
+            return;
+        }
+
+        if (bot.IsTerminated)
+        {
+            await bot.ReplyAsync(
+                message,
+                $"Bot is in terminated mode. Use `{bot.Settings.CommandPrefix}terminated off` to enable replies again.");
+            return;
+        }
+
+        await bot.RunChatAndReplyAsync(
+            message,
+            prompt: args,
+            fallbackPrompt: DiscordBot.DefaultPrompt,
+            trigger: trigger,
+            persona: persona);
     }
 
     private static async Task HandleTerminatedAsync(DiscordBot bot, SocketUserMessage message, string args)

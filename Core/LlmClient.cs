@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -27,17 +26,43 @@ public sealed class LlmClient : IDisposable
         };
     }
 
-    public async Task<string> GenerateAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken = default)
+    public Task<string> GenerateAsync(
+        IReadOnlyList<ChatMessage> messages,
+        CancellationToken cancellationToken = default)
+    {
+        return GenerateAsync(messages, _settings.MainPersonaProfile, cancellationToken);
+    }
+
+    public async Task<string> GenerateAsync(
+        IReadOnlyList<ChatMessage> messages,
+        LlmRuntimeProfile profile,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var systemPrompt = SystemPromptFactory.Build(_settings.SystemPrompt);
-            return _settings.Provider switch
+            var latestUserText = FindLatestUserText(messages);
+            var systemPrompt = SystemPromptFactory.Build(profile.SystemPrompt, latestUserText);
+            return profile.Provider switch
             {
-                "gemini" => await CallGeminiAsync(messages, systemPrompt, cancellationToken),
-                "groq" => await CallGroqAsync(messages, systemPrompt, cancellationToken),
-                "openai" => await CallOpenAiAsync(messages, systemPrompt, cancellationToken),
-                _ => throw new InvalidOperationException($"Unsupported provider: {_settings.Provider}"),
+                "gemini" => await CallGeminiAsync(
+                    messages,
+                    systemPrompt,
+                    profile.GeminiApiKey,
+                    profile.GeminiModel,
+                    cancellationToken),
+                "groq" => await CallGroqAsync(
+                    messages,
+                    systemPrompt,
+                    profile.GroqApiKey,
+                    profile.GroqModel,
+                    cancellationToken),
+                "openai" => await CallOpenAiAsync(
+                    messages,
+                    systemPrompt,
+                    profile.OpenAiApiKey,
+                    profile.OpenAiModel,
+                    cancellationToken),
+                _ => throw new InvalidOperationException($"Unsupported provider: {profile.Provider}"),
             };
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -47,7 +72,7 @@ public sealed class LlmClient : IDisposable
         catch (Exception ex)
         {
             Console.Error.WriteLine(
-                $"[{DateTimeOffset.UtcNow:O}] [llm] provider={_settings.Provider} generate failed: {ex}");
+                $"[{DateTimeOffset.UtcNow:O}] [llm] provider={profile.Provider} persona={profile.PersonaKey} generate failed: {ex}");
             return OverloadFallbackMessage;
         }
     }
@@ -73,17 +98,19 @@ public sealed class LlmClient : IDisposable
     private async Task<string> CallOpenAiAsync(
         IReadOnlyList<ChatMessage> messages,
         string systemPrompt,
+        string? apiKey,
+        string model,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(_settings.OpenAiApiKey))
+        if (string.IsNullOrWhiteSpace(apiKey))
         {
-            throw new InvalidOperationException("Missing OPENAI_API_KEY");
+            throw new InvalidOperationException("Missing OPENAI_API_KEY for selected persona.");
         }
 
         return await CallOpenAiCompatibleChatAsync(
             endpoint: "https://api.openai.com/v1/chat/completions",
-            apiKey: _settings.OpenAiApiKey,
-            model: _settings.OpenAiModel,
+            apiKey: apiKey,
+            model: model,
             systemPrompt: systemPrompt,
             messages: messages,
             cancellationToken: cancellationToken);
@@ -92,17 +119,19 @@ public sealed class LlmClient : IDisposable
     private async Task<string> CallGroqAsync(
         IReadOnlyList<ChatMessage> messages,
         string systemPrompt,
+        string? apiKey,
+        string model,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(_settings.GroqApiKey))
+        if (string.IsNullOrWhiteSpace(apiKey))
         {
-            throw new InvalidOperationException("Missing GROQ_API_KEY");
+            throw new InvalidOperationException("Missing GROQ_API_KEY for selected persona.");
         }
 
         return await CallOpenAiCompatibleChatAsync(
             endpoint: "https://api.groq.com/openai/v1/chat/completions",
-            apiKey: _settings.GroqApiKey,
-            model: _settings.GroqModel,
+            apiKey: apiKey,
+            model: model,
             systemPrompt: systemPrompt,
             messages: messages,
             cancellationToken: cancellationToken);
@@ -272,14 +301,16 @@ public sealed class LlmClient : IDisposable
     private async Task<string> CallGeminiAsync(
         IReadOnlyList<ChatMessage> messages,
         string systemPrompt,
+        string? apiKey,
+        string model,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(_settings.GeminiApiKey))
+        if (string.IsNullOrWhiteSpace(apiKey))
         {
-            throw new InvalidOperationException("Missing GEMINI_API_KEY");
+            throw new InvalidOperationException("Missing GEMINI_API_KEY for selected persona.");
         }
 
-        var endpoint = BuildGeminiEndpoint(_settings.GeminiModel, _settings.GeminiApiKey);
+        var endpoint = BuildGeminiEndpoint(model, apiKey);
         var contents = new List<object>();
         foreach (var msg in messages)
         {
@@ -391,6 +422,25 @@ public sealed class LlmClient : IDisposable
             "no" or "n" => "no",
             _ => null,
         };
+    }
+
+    private static string? FindLatestUserText(IReadOnlyList<ChatMessage> messages)
+    {
+        for (var idx = messages.Count - 1; idx >= 0; idx--)
+        {
+            var message = messages[idx];
+            if (!string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(message.Content))
+            {
+                return message.Content;
+            }
+        }
+
+        return null;
     }
 
     private static string ApprovalSystemInstruction()

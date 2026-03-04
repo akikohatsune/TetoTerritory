@@ -12,14 +12,14 @@ internal sealed class TetoModelSlashCommandHandler : ISlashCommandHandler
     {
         return new SlashCommandBuilder()
             .WithName(CommandName)
-            .WithDescription("Show current provider/model used by Teto.");
+            .WithDescription("Show current provider/model used by each persona.");
     }
 
     public Task HandleAsync(DiscordBot bot, SocketSlashCommand command)
     {
         var embed = new EmbedBuilder()
             .WithTitle("Teto Model")
-            .WithDescription($"Current model: `{bot.CurrentModelName()}`")
+            .WithDescription(bot.BuildPersonaModelSummary())
             .WithColor(Color.Magenta)
             .Build();
 

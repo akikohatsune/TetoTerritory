@@ -7,6 +7,7 @@ public sealed class Settings
 {
     private const string DefaultGeminiModel = "gemini-3-flash";
     private const string DefaultGeminiApprovalModel = "gemini-3-flash";
+    private const string DefaultGroqModel = "llama-3.3-70b-versatile";
     private const string DefaultOpenAiModel = "gpt-4o-mini";
 
     public required string DiscordToken { get; init; }
@@ -30,6 +31,19 @@ public sealed class Settings
 
     public required string SystemPrompt { get; init; }
     public required string SystemRulesPath { get; init; }
+
+    public required bool Persona2Enabled { get; init; }
+    public required string Persona2Name { get; init; }
+    public required string Persona2Provider { get; init; }
+    public string? Persona2GeminiApiKey { get; init; }
+    public required string Persona2GeminiModel { get; init; }
+    public string? Persona2GroqApiKey { get; init; }
+    public required string Persona2GroqModel { get; init; }
+    public string? Persona2OpenAiApiKey { get; init; }
+    public required string Persona2OpenAiModel { get; init; }
+    public required string Persona2SystemPrompt { get; init; }
+    public required string Persona2SystemRulesPath { get; init; }
+
     public required string ChatReplayLogPath { get; init; }
     public required string ChatMemoryDbPath { get; init; }
     public required string BanDbPath { get; init; }
@@ -40,19 +54,47 @@ public sealed class Settings
     public required double Temperature { get; init; }
     public required int MaxHistory { get; init; }
 
+    public LlmRuntimeProfile MainPersonaProfile =>
+        new(
+            PersonaKey: "main",
+            PersonaName: "teto",
+            Provider: Provider,
+            SystemPrompt: SystemPrompt,
+            GeminiApiKey: GeminiApiKey,
+            GeminiModel: GeminiModel,
+            GroqApiKey: GroqApiKey,
+            GroqModel: GroqModel,
+            OpenAiApiKey: OpenAiApiKey,
+            OpenAiModel: OpenAiModel);
+
+    public LlmRuntimeProfile? SecondaryPersonaProfile
+    {
+        get
+        {
+            if (!Persona2Enabled)
+            {
+                return null;
+            }
+
+            return new LlmRuntimeProfile(
+                PersonaKey: "persona2",
+                PersonaName: Persona2Name,
+                Provider: Persona2Provider,
+                SystemPrompt: Persona2SystemPrompt,
+                GeminiApiKey: Persona2GeminiApiKey,
+                GeminiModel: Persona2GeminiModel,
+                GroqApiKey: Persona2GroqApiKey,
+                GroqModel: Persona2GroqModel,
+                OpenAiApiKey: Persona2OpenAiApiKey,
+                OpenAiModel: Persona2OpenAiModel);
+        }
+    }
+
     public static Settings Load()
     {
-        var provider = GetEnvString("LLM_PROVIDER", "gemini").ToLowerInvariant();
-        if (provider == "chatgpt")
-        {
-            provider = "openai";
-        }
-
-        if (provider is not ("gemini" or "groq" or "openai"))
-        {
-            throw new InvalidOperationException(
-                "LLM_PROVIDER must be one of: gemini, groq, openai, chatgpt.");
-        }
+        var provider = NormalizeProvider(
+            GetEnvString("LLM_PROVIDER", "gemini"),
+            "LLM_PROVIDER");
 
         var discordToken = GetEnvString("DISCORD_TOKEN", string.Empty);
         if (string.IsNullOrWhiteSpace(discordToken))
@@ -73,7 +115,7 @@ public sealed class Settings
         var legacyMemoryDbPath = GetEnvString("MEMORY_DB_PATH", "data/chat_memory.db");
         var geminiModel = GetEnvString("GEMINI_MODEL", DefaultGeminiModel);
         var geminiApprovalModel = GetEnvString("GEMINI_APPROVAL_MODEL", DefaultGeminiApprovalModel);
-        var groqModel = GetEnvString("GROQ_MODEL", "llama-3.3-70b-versatile");
+        var groqModel = GetEnvString("GROQ_MODEL", DefaultGroqModel);
         var openAiModel = GetEnvString("OPENAI_MODEL", DefaultOpenAiModel);
 
         var geminiApiKey = GetOptionalEnv("GEMINI_API_KEY");
@@ -81,31 +123,76 @@ public sealed class Settings
         var openAiApiKey = GetOptionalEnv("OPENAI_API_KEY");
         var approvalGeminiApiKey = GetOptionalEnv("APPROVAL_GEMINI_API_KEY") ?? geminiApiKey;
 
+        var persona2RulesPath = GetEnvString("SYSTEM_RULES_PATH_2", "system_rule2.md");
+        var persona2DefaultEnabled = File.Exists(Path.GetFullPath(persona2RulesPath));
+        var persona2Enabled = GetEnvBool("PERSONA2_ENABLED", persona2DefaultEnabled);
+        var persona2Name = GetEnvString("PERSONA2_NAME", "persona2");
+        if (string.IsNullOrWhiteSpace(persona2Name))
+        {
+            persona2Name = "persona2";
+        }
+
+        var provider2Default = provider switch
+        {
+            "gemini" => "groq",
+            "groq" => "openai",
+            _ => "gemini",
+        };
+        var persona2Provider = NormalizeProvider(
+            GetEnvString("LLM_PROVIDER_2", provider2Default),
+            "LLM_PROVIDER_2");
+
+        var baseSystemPrompt2 = GetEnvString("SYSTEM_PROMPT_2", baseSystemPrompt);
+        var rulesPrompt2 = LoadSystemRulesPrompt(persona2RulesPath);
+        var fullSystemPrompt2 = string.IsNullOrWhiteSpace(rulesPrompt2)
+            ? baseSystemPrompt2
+            : $"{baseSystemPrompt2}\n\n{rulesPrompt2}";
+
+        var persona2GeminiModel = GetEnvString("GEMINI_MODEL_2", geminiModel);
+        var persona2GroqModel = GetEnvString("GROQ_MODEL_2", groqModel);
+        var persona2OpenAiModel = GetEnvString("OPENAI_MODEL_2", openAiModel);
+
+        var persona2GeminiApiKey = GetOptionalEnv("GEMINI_API_KEY_2") ?? geminiApiKey;
+        var persona2GroqApiKey = GetOptionalEnv("GROQ_API_KEY_2") ?? groqApiKey;
+        var persona2OpenAiApiKey = GetOptionalEnv("OPENAI_API_KEY_2") ?? openAiApiKey;
+
         if (string.IsNullOrWhiteSpace(geminiApprovalModel))
         {
             throw new InvalidOperationException("GEMINI_APPROVAL_MODEL cannot be empty.");
         }
 
-        if (provider == "gemini" && string.IsNullOrWhiteSpace(geminiApiKey))
-        {
-            throw new InvalidOperationException("Missing GEMINI_API_KEY for LLM_PROVIDER=gemini.");
-        }
-
-        if (provider == "groq" && string.IsNullOrWhiteSpace(groqApiKey))
-        {
-            throw new InvalidOperationException("Missing GROQ_API_KEY for LLM_PROVIDER=groq.");
-        }
-
-        if (provider == "openai" && string.IsNullOrWhiteSpace(openAiApiKey))
-        {
-            throw new InvalidOperationException(
-                "Missing OPENAI_API_KEY for LLM_PROVIDER=openai (or chatgpt).");
-        }
+        ValidateProviderKey(provider, geminiApiKey, groqApiKey, openAiApiKey, "LLM_PROVIDER");
 
         if (string.IsNullOrWhiteSpace(approvalGeminiApiKey))
         {
             throw new InvalidOperationException(
                 "Missing approval Gemini API key. Set APPROVAL_GEMINI_API_KEY or GEMINI_API_KEY.");
+        }
+
+        if (persona2Enabled)
+        {
+            ValidateProviderKey(
+                persona2Provider,
+                persona2GeminiApiKey,
+                persona2GroqApiKey,
+                persona2OpenAiApiKey,
+                "LLM_PROVIDER_2");
+
+            var mainSignature = BuildProviderSignature(
+                provider,
+                geminiModel,
+                groqModel,
+                openAiModel);
+            var persona2Signature = BuildProviderSignature(
+                persona2Provider,
+                persona2GeminiModel,
+                persona2GroqModel,
+                persona2OpenAiModel);
+            if (string.Equals(mainSignature, persona2Signature, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "PERSONA2 must use a different provider/model than the primary persona.");
+            }
         }
 
         var rpcEnabled = GetEnvBool("RPC_ENABLED", true);
@@ -171,6 +258,17 @@ public sealed class Settings
             OpenAiModel = openAiModel,
             SystemPrompt = fullSystemPrompt,
             SystemRulesPath = systemRulesPath,
+            Persona2Enabled = persona2Enabled,
+            Persona2Name = persona2Name,
+            Persona2Provider = persona2Provider,
+            Persona2GeminiApiKey = persona2GeminiApiKey,
+            Persona2GeminiModel = persona2GeminiModel,
+            Persona2GroqApiKey = persona2GroqApiKey,
+            Persona2GroqModel = persona2GroqModel,
+            Persona2OpenAiApiKey = persona2OpenAiApiKey,
+            Persona2OpenAiModel = persona2OpenAiModel,
+            Persona2SystemPrompt = fullSystemPrompt2,
+            Persona2SystemRulesPath = persona2RulesPath,
             ChatReplayLogPath = GetEnvString("CHAT_REPLAY_LOG_PATH", "logger/chat_replay.jsonl"),
             ChatMemoryDbPath = GetEnvString("CHAT_MEMORY_DB_PATH", legacyMemoryDbPath),
             BanDbPath = GetEnvString("BAN_DB_PATH", "data/ban_control.db"),
@@ -181,6 +279,72 @@ public sealed class Settings
             Temperature = GetEnvDouble("TEMPERATURE", 0.7),
             MaxHistory = GetEnvInt("MAX_HISTORY", 10, minimum: 1),
         };
+    }
+
+    private static void ValidateProviderKey(
+        string provider,
+        string? geminiApiKey,
+        string? groqApiKey,
+        string? openAiApiKey,
+        string providerEnvName)
+    {
+        if (provider == "gemini" && string.IsNullOrWhiteSpace(geminiApiKey))
+        {
+            throw new InvalidOperationException($"Missing GEMINI_API_KEY for {providerEnvName}=gemini.");
+        }
+
+        if (provider == "groq" && string.IsNullOrWhiteSpace(groqApiKey))
+        {
+            throw new InvalidOperationException($"Missing GROQ_API_KEY for {providerEnvName}=groq.");
+        }
+
+        if (provider == "openai" && string.IsNullOrWhiteSpace(openAiApiKey))
+        {
+            throw new InvalidOperationException(
+                $"Missing OPENAI_API_KEY for {providerEnvName}=openai (or chatgpt).");
+        }
+    }
+
+    private static string BuildProviderSignature(
+        string provider,
+        string geminiModel,
+        string groqModel,
+        string openAiModel)
+    {
+        var activeModel = ResolveActiveModel(provider, geminiModel, groqModel, openAiModel);
+        return $"{provider}:{activeModel}";
+    }
+
+    private static string ResolveActiveModel(
+        string provider,
+        string geminiModel,
+        string groqModel,
+        string openAiModel)
+    {
+        return provider switch
+        {
+            "gemini" => geminiModel,
+            "groq" => groqModel,
+            "openai" => openAiModel,
+            _ => throw new InvalidOperationException($"Unsupported provider: {provider}"),
+        };
+    }
+
+    private static string NormalizeProvider(string rawValue, string variableName)
+    {
+        var provider = rawValue.Trim().ToLowerInvariant();
+        if (provider == "chatgpt")
+        {
+            provider = "openai";
+        }
+
+        if (provider is not ("gemini" or "groq" or "openai"))
+        {
+            throw new InvalidOperationException(
+                $"{variableName} must be one of: gemini, groq, openai, chatgpt.");
+        }
+
+        return provider;
     }
 
     private static string GetEnvString(string name, string fallback)

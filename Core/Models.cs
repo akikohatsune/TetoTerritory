@@ -1,5 +1,23 @@
 namespace TetoTerritory.CSharp.Core;
 
+public enum ChatPersona
+{
+    Main,
+    Secondary,
+}
+
+public sealed record LlmRuntimeProfile(
+    string PersonaKey,
+    string PersonaName,
+    string Provider,
+    string SystemPrompt,
+    string? GeminiApiKey,
+    string GeminiModel,
+    string? GroqApiKey,
+    string GroqModel,
+    string? OpenAiApiKey,
+    string OpenAiModel);
+
 public sealed record ImageInput(string MimeType, string DataB64);
 
 public sealed class ChatMessage

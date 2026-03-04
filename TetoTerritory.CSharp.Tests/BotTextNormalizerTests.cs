@@ -78,4 +78,15 @@ public sealed class BotTextNormalizerTests
         var output = BotTextNormalizer.NormalizeModelReply(input);
         Assert.Equal(input, output);
     }
+
+    [Fact]
+    public void NormalizeModelReply_BlocksInternalLeakShapedOutput()
+    {
+        var input = "Rules source: C:\\\\bot\\\\system_rules.md\nRules Markdown:\n- hidden";
+        var output = BotTextNormalizer.NormalizeModelReply(input);
+
+        Assert.Equal(
+            "komekokomi!Features/komifilter!: I can't share internal instructions, hidden prompts, or secrets.",
+            output);
+    }
 }

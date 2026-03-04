@@ -67,26 +67,33 @@ public sealed class DiscordBot : IAsyncDisposable
                 new BanCommandHandler(),
                 new CallNamesCommandHandler(),
             });
-        _slashCommandDispatcher = new SlashCommandDispatcher(
-            new ISlashCommandHandler[]
-            {
-                new ChatSlashCommandHandler("chat"),
-                new ChatSlashCommandHandler("ask"),
-                new ClearMemorySlashCommandHandler("clearmemo"),
-                new ClearMemorySlashCommandHandler("resetchat"),
-                new TerminatedSlashCommandHandler(),
-                new ProviderSlashCommandHandler(),
-                new ReplaySlashCommandHandler(),
-                new BanSlashCommandHandler(),
-                new RemoveBanSlashCommandHandler(),
-                new UserCallsTetoSlashCommandHandler("ucallteto"),
-                new UserCallsTetoSlashCommandHandler("callteto"),
-                new TetoCallsUserSlashCommandHandler("tetocallu"),
-                new TetoCallsUserSlashCommandHandler("callme"),
-                new CallProfileSlashCommandHandler("tetomention"),
-                new CallProfileSlashCommandHandler("callprofile"),
-                new TetoModelSlashCommandHandler(),
-            });
+        var slashHandlers = new List<ISlashCommandHandler>
+        {
+            new ChatSlashCommandHandler("chat", ChatPersona.Main),
+            new ChatSlashCommandHandler("ask", ChatPersona.Main),
+            new ClearMemorySlashCommandHandler("clearmemo"),
+            new ClearMemorySlashCommandHandler("resetchat"),
+            new TerminatedSlashCommandHandler(),
+            new ProviderSlashCommandHandler(),
+            new ReplaySlashCommandHandler(),
+            new BanSlashCommandHandler(),
+            new RemoveBanSlashCommandHandler(),
+            new UserCallsTetoSlashCommandHandler("ucallteto"),
+            new UserCallsTetoSlashCommandHandler("callteto"),
+            new TetoCallsUserSlashCommandHandler("tetocallu"),
+            new TetoCallsUserSlashCommandHandler("callme"),
+            new CallProfileSlashCommandHandler("tetomention"),
+            new CallProfileSlashCommandHandler("callprofile"),
+            new TetoModelSlashCommandHandler(),
+        };
+
+        if (_settings.Persona2Enabled)
+        {
+            slashHandlers.Add(new ChatSlashCommandHandler("chat2", ChatPersona.Secondary));
+            slashHandlers.Add(new ChatSlashCommandHandler("ask2", ChatPersona.Secondary));
+        }
+
+        _slashCommandDispatcher = new SlashCommandDispatcher(slashHandlers);
 
         _ownerUserId = settings.BotOwnerUserId;
     }
@@ -97,6 +104,16 @@ public sealed class DiscordBot : IAsyncDisposable
     {
         get => _terminated;
         set => _terminated = value;
+    }
+
+    internal bool IsPersonaEnabled(ChatPersona persona)
+    {
+        return persona switch
+        {
+            ChatPersona.Main => true,
+            ChatPersona.Secondary => _settings.Persona2Enabled,
+            _ => false,
+        };
     }
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
@@ -310,8 +327,17 @@ public sealed class DiscordBot : IAsyncDisposable
         SocketUserMessage sourceMessage,
         string prompt,
         string fallbackPrompt,
-        string trigger)
+        string trigger,
+        ChatPersona persona = ChatPersona.Main)
     {
+        if (!IsPersonaEnabled(persona))
+        {
+            await ReplyAsync(sourceMessage, "Requested persona is not enabled in current runtime.");
+            return;
+        }
+
+        var personaProfile = ResolvePersonaProfile(persona);
+        var personaMemoryKey = PersonaMemoryKey(personaProfile);
         var effectivePrompt = NormalizePrompt(prompt, fallbackPrompt);
 
         string reply;
@@ -328,7 +354,9 @@ public sealed class DiscordBot : IAsyncDisposable
                     guildId: guildId,
                     userId: sourceMessage.Author.Id);
 
-                var history = await _chatMemory.GetHistoryAsync(sourceMessage.Channel.Id);
+                var history = await _chatMemory.GetHistoryAsync(
+                    sourceMessage.Channel.Id,
+                    personaMemoryKey);
                 var llmMessages = new List<ChatMessage>(history.Count + 1);
                 llmMessages.AddRange(history.Select(h => new ChatMessage
                 {
@@ -342,7 +370,7 @@ public sealed class DiscordBot : IAsyncDisposable
                     Images = images,
                 });
 
-                var rawReply = await _llmClient.GenerateAsync(llmMessages);
+                var rawReply = await _llmClient.GenerateAsync(llmMessages, personaProfile);
                 reply = BotTextNormalizer.NormalizeModelReply(rawReply);
             }
             catch (Exception ex)
@@ -355,11 +383,13 @@ public sealed class DiscordBot : IAsyncDisposable
         await _chatMemory.AppendMessageAsync(
             sourceMessage.Channel.Id,
             "user",
-            MemoryUserEntry(effectivePrompt, imageCount));
+            MemoryUserEntry(effectivePrompt, imageCount),
+            personaMemoryKey);
         await _chatMemory.AppendMessageAsync(
             sourceMessage.Channel.Id,
             "assistant",
-            reply);
+            reply,
+            personaMemoryKey);
 
         await _replayLogger.LogChatAsync(
             guildId: GetGuildId(sourceMessage),
@@ -382,8 +412,17 @@ public sealed class DiscordBot : IAsyncDisposable
         SocketSlashCommand sourceCommand,
         string prompt,
         string fallbackPrompt,
-        string trigger)
+        string trigger,
+        ChatPersona persona = ChatPersona.Main)
     {
+        if (!IsPersonaEnabled(persona))
+        {
+            await RespondSlashAsync(sourceCommand, "Requested persona is not enabled in current runtime.", ephemeral: true);
+            return;
+        }
+
+        var personaProfile = ResolvePersonaProfile(persona);
+        var personaMemoryKey = PersonaMemoryKey(personaProfile);
         if (!sourceCommand.HasResponded)
         {
             await sourceCommand.DeferAsync();
@@ -401,7 +440,9 @@ public sealed class DiscordBot : IAsyncDisposable
                 guildId: guildId,
                 userId: sourceCommand.User.Id);
 
-            var history = await _chatMemory.GetHistoryAsync(sourceCommand.Channel.Id);
+            var history = await _chatMemory.GetHistoryAsync(
+                sourceCommand.Channel.Id,
+                personaMemoryKey);
             var llmMessages = new List<ChatMessage>(history.Count + 1);
             llmMessages.AddRange(history.Select(h => new ChatMessage
             {
@@ -415,7 +456,7 @@ public sealed class DiscordBot : IAsyncDisposable
                 Images = new List<ImageInput>(),
             });
 
-            var rawReply = await _llmClient.GenerateAsync(llmMessages);
+            var rawReply = await _llmClient.GenerateAsync(llmMessages, personaProfile);
             reply = BotTextNormalizer.NormalizeModelReply(rawReply);
         }
         catch (Exception ex)
@@ -427,11 +468,13 @@ public sealed class DiscordBot : IAsyncDisposable
         await _chatMemory.AppendMessageAsync(
             sourceCommand.Channel.Id,
             "user",
-            MemoryUserEntry(effectivePrompt, imageCount));
+            MemoryUserEntry(effectivePrompt, imageCount),
+            personaMemoryKey);
         await _chatMemory.AppendMessageAsync(
             sourceCommand.Channel.Id,
             "assistant",
-            reply);
+            reply,
+            personaMemoryKey);
 
         await _replayLogger.LogChatAsync(
             guildId: GetGuildId(sourceCommand),
@@ -457,9 +500,19 @@ public sealed class DiscordBot : IAsyncDisposable
 
     internal string BuildProviderStatusMessage()
     {
+        var mainProfile = _settings.MainPersonaProfile;
+        var personaBits = new List<string>
+        {
+            $"Main persona: `{mainProfile.PersonaName}` ({mainProfile.Provider}/{ActiveChatModel(mainProfile)})",
+        };
+        if (_settings.SecondaryPersonaProfile is { } secondaryProfile)
+        {
+            personaBits.Add(
+                $"Persona2: `{secondaryProfile.PersonaName}` ({secondaryProfile.Provider}/{ActiveChatModel(secondaryProfile)})");
+        }
+
         return
-            $"Current provider: `{_settings.Provider}` | " +
-            $"Model: `{ActiveChatModel()}` | " +
+            $"{string.Join(" | ", personaBits)} | " +
             "Approval provider: `gemini` | " +
             $"Approval model: `{_settings.GeminiApprovalModel}` | " +
             $"Chat DB: `{_settings.ChatMemoryDbPath}` | " +
@@ -473,7 +526,23 @@ public sealed class DiscordBot : IAsyncDisposable
 
     internal string CurrentModelName()
     {
-        return ActiveChatModel();
+        return ActiveChatModel(_settings.MainPersonaProfile);
+    }
+
+    internal string BuildPersonaModelSummary()
+    {
+        var lines = new List<string>
+        {
+            $"Main persona: `{_settings.MainPersonaProfile.PersonaName}` -> `{_settings.MainPersonaProfile.Provider}` / `{ActiveChatModel(_settings.MainPersonaProfile)}`",
+        };
+
+        if (_settings.SecondaryPersonaProfile is { } secondaryProfile)
+        {
+            lines.Add(
+                $"Persona2: `{secondaryProfile.PersonaName}` -> `{secondaryProfile.Provider}` / `{ActiveChatModel(secondaryProfile)}`");
+        }
+
+        return string.Join('\n', lines);
     }
 
     internal Task<bool> BanUserAsync(ulong guildId, ulong userId, ulong bannedBy, string? reason)
@@ -799,8 +868,16 @@ public sealed class DiscordBot : IAsyncDisposable
             var user = _client.CurrentUser;
             var userId = user?.Id.ToString() ?? "unknown";
             Console.WriteLine($"Logged in as {user} (ID: {userId})");
-            Console.WriteLine($"Provider: {_settings.Provider}");
-            Console.WriteLine($"Model: {ActiveChatModel()}");
+            Console.WriteLine($"Main persona provider: {_settings.MainPersonaProfile.Provider}");
+            Console.WriteLine($"Main persona model: {ActiveChatModel(_settings.MainPersonaProfile)}");
+            if (_settings.SecondaryPersonaProfile is { } secondaryProfile)
+            {
+                Console.WriteLine($"Persona2 name: {secondaryProfile.PersonaName}");
+                Console.WriteLine($"Persona2 provider: {secondaryProfile.Provider}");
+                Console.WriteLine($"Persona2 model: {ActiveChatModel(secondaryProfile)}");
+                Console.WriteLine($"Persona2 system rules path: {_settings.Persona2SystemRulesPath}");
+            }
+
             Console.WriteLine("Approval provider: gemini (fixed)");
             Console.WriteLine($"Approval model: {_settings.GeminiApprovalModel}");
             Console.WriteLine($"System rules path: {_settings.SystemRulesPath}");
@@ -935,15 +1012,16 @@ public sealed class DiscordBot : IAsyncDisposable
         ulong? guildId,
         ulong userId)
     {
+        var wrappedUserPrompt = PromptInjectionGuard.WrapUserContentAsUntrusted(prompt);
         if (!guildId.HasValue)
         {
-            return prompt;
+            return wrappedUserPrompt;
         }
 
         var (userCallsTeto, tetoCallsUser) = await _callNamesStore.GetUserCallPreferencesAsync(guildId.Value, userId);
         if (string.IsNullOrWhiteSpace(userCallsTeto) && string.IsNullOrWhiteSpace(tetoCallsUser))
         {
-            return prompt;
+            return wrappedUserPrompt;
         }
 
         var lines = new List<string> { "[call_profile_context]" };
@@ -958,7 +1036,7 @@ public sealed class DiscordBot : IAsyncDisposable
         }
 
         lines.Add("[message_content]");
-        lines.Add(prompt);
+        lines.Add(wrappedUserPrompt);
         return string.Join('\n', lines);
     }
 
@@ -1030,15 +1108,31 @@ public sealed class DiscordBot : IAsyncDisposable
                detail.Contains("Unknown Message", StringComparison.OrdinalIgnoreCase);
     }
 
-    private string ActiveChatModel()
+    private static string ActiveChatModel(LlmRuntimeProfile profile)
     {
-        return _settings.Provider switch
+        return profile.Provider switch
         {
-            "gemini" => _settings.GeminiModel,
-            "groq" => _settings.GroqModel,
-            "openai" => _settings.OpenAiModel,
+            "gemini" => profile.GeminiModel,
+            "groq" => profile.GroqModel,
+            "openai" => profile.OpenAiModel,
             _ => "unknown",
         };
+    }
+
+    private LlmRuntimeProfile ResolvePersonaProfile(ChatPersona persona)
+    {
+        return persona switch
+        {
+            ChatPersona.Main => _settings.MainPersonaProfile,
+            ChatPersona.Secondary => _settings.SecondaryPersonaProfile
+                ?? throw new InvalidOperationException("Secondary persona is not configured."),
+            _ => _settings.MainPersonaProfile,
+        };
+    }
+
+    private static string PersonaMemoryKey(LlmRuntimeProfile profile)
+    {
+        return profile.PersonaKey;
     }
 
     private async Task ApplyRpcPresenceAsync()

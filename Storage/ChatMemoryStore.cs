@@ -5,6 +5,8 @@ namespace TetoTerritory.CSharp.Storage;
 
 public sealed class ChatMemoryStore
 {
+    private const string DefaultPersonaKey = "main";
+
     private readonly string _dbPath;
     private readonly int _maxMessages;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -33,6 +35,7 @@ public sealed class ChatMemoryStore
                 CREATE TABLE IF NOT EXISTS chat_memory (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     channel_id INTEGER NOT NULL,
+                    persona TEXT NOT NULL DEFAULT 'main',
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -40,9 +43,22 @@ public sealed class ChatMemoryStore
                 """,
                 cancellationToken);
 
+            if (!await HasColumnAsync(conn, "chat_memory", "persona", cancellationToken))
+            {
+                await ExecuteAsync(
+                    conn,
+                    "ALTER TABLE chat_memory ADD COLUMN persona TEXT NOT NULL DEFAULT 'main'",
+                    cancellationToken);
+            }
+
             await ExecuteAsync(
                 conn,
                 "CREATE INDEX IF NOT EXISTS idx_chat_memory_channel_id_id ON chat_memory (channel_id, id)",
+                cancellationToken);
+
+            await ExecuteAsync(
+                conn,
+                "CREATE INDEX IF NOT EXISTS idx_chat_memory_channel_persona_id ON chat_memory (channel_id, persona, id)",
                 cancellationToken);
         }
         finally
@@ -53,10 +69,22 @@ public sealed class ChatMemoryStore
 
     public async Task AppendMessageAsync(ulong channelId, string role, string content, CancellationToken cancellationToken = default)
     {
+        await AppendMessageAsync(channelId, role, content, DefaultPersonaKey, cancellationToken);
+    }
+
+    public async Task AppendMessageAsync(
+        ulong channelId,
+        string role,
+        string content,
+        string personaKey,
+        CancellationToken cancellationToken = default)
+    {
         if (role is not ("user" or "assistant"))
         {
             throw new ArgumentException($"Invalid role: {role}", nameof(role));
         }
+
+        var normalizedPersona = NormalizePersonaKey(personaKey);
 
         await _gate.WaitAsync(cancellationToken);
         try
@@ -68,14 +96,15 @@ public sealed class ChatMemoryStore
             await using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
-                cmd.CommandText = "INSERT INTO chat_memory (channel_id, role, content) VALUES (@channelId, @role, @content)";
+                cmd.CommandText = "INSERT INTO chat_memory (channel_id, persona, role, content) VALUES (@channelId, @persona, @role, @content)";
                 cmd.Parameters.AddWithValue("@channelId", (long)channelId);
+                cmd.Parameters.AddWithValue("@persona", normalizedPersona);
                 cmd.Parameters.AddWithValue("@role", role);
                 cmd.Parameters.AddWithValue("@content", content);
                 await cmd.ExecuteNonQueryAsync(cancellationToken);
             }
 
-            await TrimChannelAsync(conn, tx, channelId, cancellationToken);
+            await TrimChannelAsync(conn, tx, channelId, normalizedPersona, cancellationToken);
             await tx.CommitAsync(cancellationToken);
         }
         finally
@@ -86,7 +115,16 @@ public sealed class ChatMemoryStore
 
     public async Task<IReadOnlyList<MemoryMessage>> GetHistoryAsync(ulong channelId, CancellationToken cancellationToken = default)
     {
+        return await GetHistoryAsync(channelId, DefaultPersonaKey, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<MemoryMessage>> GetHistoryAsync(
+        ulong channelId,
+        string personaKey,
+        CancellationToken cancellationToken = default)
+    {
         var rows = new List<MemoryMessage>();
+        var normalizedPersona = NormalizePersonaKey(personaKey);
 
         await _gate.WaitAsync(cancellationToken);
         try
@@ -100,10 +138,12 @@ public sealed class ChatMemoryStore
                 SELECT role, content
                 FROM chat_memory
                 WHERE channel_id = @channelId
+                  AND persona = @persona
                 ORDER BY id DESC
                 LIMIT @limit
                 """;
             cmd.Parameters.AddWithValue("@channelId", (long)channelId);
+            cmd.Parameters.AddWithValue("@persona", normalizedPersona);
             cmd.Parameters.AddWithValue("@limit", _maxMessages);
 
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
@@ -142,6 +182,31 @@ public sealed class ChatMemoryStore
         }
     }
 
+    public async Task ClearChannelAsync(
+        ulong channelId,
+        string personaKey,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedPersona = NormalizePersonaKey(personaKey);
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var conn = CreateConnection();
+            await conn.OpenAsync(cancellationToken);
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM chat_memory WHERE channel_id = @channelId AND persona = @persona";
+            cmd.Parameters.AddWithValue("@channelId", (long)channelId);
+            cmd.Parameters.AddWithValue("@persona", normalizedPersona);
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task PruneInactiveChannelsAsync(int idleSeconds, CancellationToken cancellationToken = default)
     {
         if (idleSeconds <= 0)
@@ -159,10 +224,10 @@ public sealed class ChatMemoryStore
             cmd.CommandText =
                 """
                 DELETE FROM chat_memory
-                WHERE channel_id IN (
-                    SELECT channel_id
+                WHERE (channel_id, persona) IN (
+                    SELECT channel_id, persona
                     FROM chat_memory
-                    GROUP BY channel_id
+                    GROUP BY channel_id, persona
                     HAVING MAX(created_at) < datetime('now', @offset)
                 )
                 """;
@@ -179,6 +244,7 @@ public sealed class ChatMemoryStore
         SqliteConnection conn,
         SqliteTransaction tx,
         ulong channelId,
+        string personaKey,
         CancellationToken cancellationToken)
     {
         long? cutoffId = null;
@@ -190,10 +256,12 @@ public sealed class ChatMemoryStore
                 SELECT id
                 FROM chat_memory
                 WHERE channel_id = @channelId
+                  AND persona = @persona
                 ORDER BY id DESC
                 LIMIT 1 OFFSET @offset
                 """;
             cutoffCmd.Parameters.AddWithValue("@channelId", (long)channelId);
+            cutoffCmd.Parameters.AddWithValue("@persona", personaKey);
             cutoffCmd.Parameters.AddWithValue("@offset", _maxMessages - 1);
 
             var scalar = await cutoffCmd.ExecuteScalarAsync(cancellationToken);
@@ -211,8 +279,9 @@ public sealed class ChatMemoryStore
         await using var deleteCmd = conn.CreateCommand();
         deleteCmd.Transaction = tx;
         deleteCmd.CommandText =
-            "DELETE FROM chat_memory WHERE channel_id = @channelId AND id < @cutoffId";
+            "DELETE FROM chat_memory WHERE channel_id = @channelId AND persona = @persona AND id < @cutoffId";
         deleteCmd.Parameters.AddWithValue("@channelId", (long)channelId);
+        deleteCmd.Parameters.AddWithValue("@persona", personaKey);
         deleteCmd.Parameters.AddWithValue("@cutoffId", cutoffId.Value);
         await deleteCmd.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -237,5 +306,36 @@ public sealed class ChatMemoryStore
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         await cmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static string NormalizePersonaKey(string? personaKey)
+    {
+        if (string.IsNullOrWhiteSpace(personaKey))
+        {
+            return DefaultPersonaKey;
+        }
+
+        return personaKey.Trim().ToLowerInvariant();
+    }
+
+    private static async Task<bool> HasColumnAsync(
+        SqliteConnection conn,
+        string tableName,
+        string columnName,
+        CancellationToken cancellationToken)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"PRAGMA table_info({tableName})";
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var name = reader.GetString(1);
+            if (string.Equals(name, columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

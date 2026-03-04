@@ -17,7 +17,7 @@ public static class BotTextNormalizer
 
     public static string NormalizeModelReply(string text)
     {
-        return LatexToPlainMath(text);
+        return LatexToPlainMath(PromptInjectionGuard.ProtectModelReply(text));
     }
 
     public static string LatexToPlainMath(string text)

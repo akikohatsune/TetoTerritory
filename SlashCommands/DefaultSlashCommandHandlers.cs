@@ -7,10 +7,12 @@ namespace TetoTerritory.CSharp.SlashCommands;
 internal sealed class ChatSlashCommandHandler : ISlashCommandHandler
 {
     private readonly string _commandName;
+    private readonly ChatPersona _persona;
 
-    public ChatSlashCommandHandler(string commandName)
+    public ChatSlashCommandHandler(string commandName, ChatPersona persona)
     {
         _commandName = commandName;
+        _persona = persona;
     }
 
     public string CommandName => _commandName;
@@ -29,6 +31,12 @@ internal sealed class ChatSlashCommandHandler : ISlashCommandHandler
 
     public async Task HandleAsync(DiscordBot bot, SocketSlashCommand command)
     {
+        if (!bot.IsPersonaEnabled(_persona))
+        {
+            await bot.RespondSlashAsync(command, "Persona2 is disabled. Configure PERSONA2_* settings first.", ephemeral: true);
+            return;
+        }
+
         var prompt = SlashOptionReader.GetString(command, "prompt", fallback: string.Empty);
         var guildId = bot.GetGuildId(command);
 
@@ -51,7 +59,8 @@ internal sealed class ChatSlashCommandHandler : ISlashCommandHandler
             command,
             prompt: prompt,
             fallbackPrompt: DiscordBot.DefaultPrompt,
-            trigger: $"slash:{_commandName}");
+            trigger: $"slash:{_commandName}",
+            persona: _persona);
     }
 }
 
