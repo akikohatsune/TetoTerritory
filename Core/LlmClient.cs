@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -7,6 +8,9 @@ namespace TetoTerritory.CSharp.Core;
 public sealed class LlmClient : IDisposable
 {
     private const string OverloadFallbackMessage = "i overload!";
+    private const int MaxUpstreamAttempts = 4;
+    private const int BaseRetryDelayMs = 750;
+    private const int MaxRetryDelayMs = 15_000;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -465,37 +469,143 @@ public sealed class LlmClient : IDisposable
         string? bearerToken,
         CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+        for (var attempt = 1; attempt <= MaxUpstreamAttempts; attempt++)
         {
-            Content = new StringContent(
-                JsonSerializer.Serialize(payload, JsonOptions),
-                Encoding.UTF8,
-                "application/json"),
-        };
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+                {
+                    Content = new StringContent(
+                        JsonSerializer.Serialize(payload, JsonOptions),
+                        Encoding.UTF8,
+                        "application/json"),
+                };
 
-        if (!string.IsNullOrWhiteSpace(bearerToken))
-        {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+                if (!string.IsNullOrWhiteSpace(bearerToken))
+                {
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+                }
+
+                using var response = await _httpClient.SendAsync(request, cancellationToken);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var snippet = body.Length <= 400 ? body : body[..400];
+                    if (!IsTransientStatusCode(response.StatusCode) || attempt == MaxUpstreamAttempts)
+                    {
+                        var suffix = attempt > 1 ? $" (after {attempt} attempts)" : string.Empty;
+                        throw new InvalidOperationException(
+                            $"Upstream HTTP {(int)response.StatusCode} ({response.ReasonPhrase}){suffix}: {snippet}");
+                    }
+
+                    var delay = ComputeRetryDelay(attempt, response.Headers.RetryAfter);
+                    Console.Error.WriteLine(
+                        $"[{DateTimeOffset.UtcNow:O}] [llm] transient upstream HTTP {(int)response.StatusCode} ({response.ReasonPhrase}) on attempt {attempt}/{MaxUpstreamAttempts}; retrying in {(int)delay.TotalMilliseconds}ms");
+                    await Task.Delay(delay, cancellationToken);
+                    continue;
+                }
+
+                try
+                {
+                    return JsonDocument.Parse(body);
+                }
+                catch (JsonException ex)
+                {
+                    throw new InvalidOperationException(
+                        $"Invalid JSON from upstream: {ex.Message}",
+                        ex);
+                }
+            }
+            catch (HttpRequestException ex) when (attempt < MaxUpstreamAttempts)
+            {
+                var delay = ComputeRetryDelay(attempt, retryAfter: null);
+                Console.Error.WriteLine(
+                    $"[{DateTimeOffset.UtcNow:O}] [llm] transient upstream network error on attempt {attempt}/{MaxUpstreamAttempts}: {ex.Message}; retrying in {(int)delay.TotalMilliseconds}ms");
+                await Task.Delay(delay, cancellationToken);
+            }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested && attempt < MaxUpstreamAttempts)
+            {
+                var delay = ComputeRetryDelay(attempt, retryAfter: null);
+                Console.Error.WriteLine(
+                    $"[{DateTimeOffset.UtcNow:O}] [llm] upstream request timed out on attempt {attempt}/{MaxUpstreamAttempts}: {ex.Message}; retrying in {(int)delay.TotalMilliseconds}ms");
+                await Task.Delay(delay, cancellationToken);
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Upstream request failed after {MaxUpstreamAttempts} attempts: {ex.Message}",
+                    ex);
+            }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"Upstream request timed out after {MaxUpstreamAttempts} attempts.",
+                    ex);
+            }
         }
 
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (!response.IsSuccessStatusCode)
+        throw new InvalidOperationException("Upstream request failed after retries.");
+    }
+
+    private static bool IsTransientStatusCode(HttpStatusCode statusCode)
+    {
+        var code = (int)statusCode;
+        return statusCode is HttpStatusCode.RequestTimeout
+            or HttpStatusCode.TooManyRequests
+            or HttpStatusCode.InternalServerError
+            or HttpStatusCode.BadGateway
+            or HttpStatusCode.ServiceUnavailable
+            or HttpStatusCode.GatewayTimeout
+            || code == 425;
+    }
+
+    private static TimeSpan ComputeRetryDelay(int attempt, RetryConditionHeaderValue? retryAfter)
+    {
+        var suggestedDelay = ParseRetryAfter(retryAfter);
+        if (suggestedDelay.HasValue)
         {
-            var snippet = body.Length <= 400 ? body : body[..400];
-            throw new InvalidOperationException(
-                $"Upstream HTTP {(int)response.StatusCode} ({response.ReasonPhrase}): {snippet}");
+            return ClampRetryDelay(suggestedDelay.Value);
         }
 
-        try
+        var exponentialMs = BaseRetryDelayMs * Math.Pow(2, attempt - 1);
+        var jitterMs = Random.Shared.Next(125, 501);
+        var delayMs = Math.Min(MaxRetryDelayMs, exponentialMs + jitterMs);
+        return TimeSpan.FromMilliseconds(delayMs);
+    }
+
+    private static TimeSpan? ParseRetryAfter(RetryConditionHeaderValue? retryAfter)
+    {
+        if (retryAfter is null)
         {
-            return JsonDocument.Parse(body);
+            return null;
         }
-        catch (JsonException ex)
+
+        if (retryAfter.Delta.HasValue)
         {
-            throw new InvalidOperationException(
-                $"Invalid JSON from upstream: {ex.Message}",
-                ex);
+            return retryAfter.Delta.Value;
         }
+
+        if (retryAfter.Date.HasValue)
+        {
+            var delta = retryAfter.Date.Value - DateTimeOffset.UtcNow;
+            return delta > TimeSpan.Zero ? delta : TimeSpan.Zero;
+        }
+
+        return null;
+    }
+
+    private static TimeSpan ClampRetryDelay(TimeSpan delay)
+    {
+        if (delay <= TimeSpan.Zero)
+        {
+            return TimeSpan.FromMilliseconds(BaseRetryDelayMs);
+        }
+
+        if (delay > TimeSpan.FromMilliseconds(MaxRetryDelayMs))
+        {
+            return TimeSpan.FromMilliseconds(MaxRetryDelayMs);
+        }
+
+        return delay;
     }
 }
