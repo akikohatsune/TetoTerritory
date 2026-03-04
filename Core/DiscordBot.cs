@@ -20,6 +20,8 @@ public sealed class DiscordBot : IAsyncDisposable
     private readonly DiscordSocketClient _client;
     private readonly HttpClient _httpClient;
     private readonly LlmClient _llmClient;
+    private readonly MainPersonaLlmClient _mainLlmClient;
+    private readonly SecondaryPersonaLlmClient _secondaryLlmClient;
     private readonly ChatMemoryStore _chatMemory;
     private readonly BanStore _banStore;
     private readonly CallNamesStore _callNamesStore;
@@ -53,6 +55,8 @@ public sealed class DiscordBot : IAsyncDisposable
             Timeout = TimeSpan.FromSeconds(45),
         };
         _llmClient = new LlmClient(settings);
+        _mainLlmClient = new MainPersonaLlmClient(_llmClient, settings);
+        _secondaryLlmClient = new SecondaryPersonaLlmClient(_llmClient);
         _chatMemory = new ChatMemoryStore(settings.ChatMemoryDbPath, settings.MaxHistory);
         _banStore = new BanStore(settings.BanDbPath);
         _callNamesStore = new CallNamesStore(settings.CallnamesDbPath);
@@ -326,7 +330,18 @@ public sealed class DiscordBot : IAsyncDisposable
         ChatPersona? persona = null)
     {
         var effectivePrompt = NormalizePrompt(prompt, fallbackPrompt);
-        var selectedPersona = persona ?? ResolvePersonaForPrompt(effectivePrompt);
+        var routedPrompt = effectivePrompt;
+        ChatPersona selectedPersona;
+        if (persona.HasValue)
+        {
+            selectedPersona = persona.Value;
+        }
+        else
+        {
+            selectedPersona = ResolvePersonaForPrompt(effectivePrompt, out routedPrompt);
+            effectivePrompt = NormalizePrompt(routedPrompt, fallbackPrompt);
+        }
+
         if (!IsPersonaEnabled(selectedPersona))
         {
             await ReplyAsync(sourceMessage, "Requested persona is not enabled in current runtime.");
@@ -366,7 +381,7 @@ public sealed class DiscordBot : IAsyncDisposable
                     Images = images,
                 });
 
-                var rawReply = await _llmClient.GenerateAsync(llmMessages, personaProfile);
+                var rawReply = await GenerateReplyByPersonaAsync(selectedPersona, llmMessages, personaProfile);
                 reply = BotTextNormalizer.NormalizeModelReply(rawReply);
             }
             catch (Exception ex)
@@ -412,7 +427,18 @@ public sealed class DiscordBot : IAsyncDisposable
         ChatPersona? persona = null)
     {
         var effectivePrompt = NormalizePrompt(prompt, fallbackPrompt);
-        var selectedPersona = persona ?? ResolvePersonaForPrompt(effectivePrompt);
+        var routedPrompt = effectivePrompt;
+        ChatPersona selectedPersona;
+        if (persona.HasValue)
+        {
+            selectedPersona = persona.Value;
+        }
+        else
+        {
+            selectedPersona = ResolvePersonaForPrompt(effectivePrompt, out routedPrompt);
+            effectivePrompt = NormalizePrompt(routedPrompt, fallbackPrompt);
+        }
+
         if (!IsPersonaEnabled(selectedPersona))
         {
             await RespondSlashAsync(sourceCommand, "Requested persona is not enabled in current runtime.", ephemeral: true);
@@ -452,7 +478,7 @@ public sealed class DiscordBot : IAsyncDisposable
                 Images = new List<ImageInput>(),
             });
 
-            var rawReply = await _llmClient.GenerateAsync(llmMessages, personaProfile);
+            var rawReply = await GenerateReplyByPersonaAsync(selectedPersona, llmMessages, personaProfile);
             reply = BotTextNormalizer.NormalizeModelReply(rawReply);
         }
         catch (Exception ex)
@@ -525,9 +551,11 @@ public sealed class DiscordBot : IAsyncDisposable
         if (_settings.SecondaryPersonaProfile is { } secondaryProfile)
         {
             lines.Add(
-                $"Persona2 (hidden, keyword activated): `{secondaryProfile.PersonaName}` -> `{secondaryProfile.Provider}` / `{ActiveChatModel(secondaryProfile)}`");
+                $"Persona2 (keyword or explicit request): `{secondaryProfile.PersonaName}` -> `{secondaryProfile.Provider}` / `{ActiveChatModel(secondaryProfile)}`");
             lines.Add(
                 $"Persona2 keyword file: `{_settings.Persona2KeywordsPath}` | loaded keywords: `{_settings.Persona2Keywords.Count}`");
+            lines.Add(
+                $"Activate persona2 by keyword match, or prefix prompt with `@{secondaryProfile.PersonaName}:` or `/{secondaryProfile.PersonaName}`.");
         }
 
         return string.Join('\n', lines);
@@ -866,6 +894,7 @@ public sealed class DiscordBot : IAsyncDisposable
                 Console.WriteLine($"Persona2 system rules path: {_settings.Persona2SystemRulesPath}");
                 Console.WriteLine($"Persona2 keyword path: {_settings.Persona2KeywordsPath}");
                 Console.WriteLine($"Persona2 keyword count: {_settings.Persona2Keywords.Count}");
+                Console.WriteLine($"Persona2 activation: keyword match or explicit prompt directive (e.g. '@{secondaryProfile.PersonaName}: ...').");
             }
 
             Console.WriteLine("Approval provider: gemini (fixed)");
@@ -1109,6 +1138,19 @@ public sealed class DiscordBot : IAsyncDisposable
         };
     }
 
+    private Task<string> GenerateReplyByPersonaAsync(
+        ChatPersona persona,
+        IReadOnlyList<ChatMessage> llmMessages,
+        LlmRuntimeProfile personaProfile)
+    {
+        return persona switch
+        {
+            ChatPersona.Main => _mainLlmClient.GenerateAsync(llmMessages),
+            ChatPersona.Secondary => _secondaryLlmClient.GenerateAsync(llmMessages, personaProfile),
+            _ => _mainLlmClient.GenerateAsync(llmMessages),
+        };
+    }
+
     private LlmRuntimeProfile ResolvePersonaProfile(ChatPersona persona)
     {
         return persona switch
@@ -1125,16 +1167,86 @@ public sealed class DiscordBot : IAsyncDisposable
         return profile.PersonaKey;
     }
 
-    private ChatPersona ResolvePersonaForPrompt(string prompt)
+    private ChatPersona ResolvePersonaForPrompt(string prompt, out string routedPrompt)
     {
-        if (!_settings.Persona2Enabled || _settings.Persona2Keywords.Count == 0)
+        routedPrompt = prompt;
+        if (!_settings.Persona2Enabled)
         {
             return ChatPersona.Main;
         }
 
-        return PersonaKeywordMatcher.ContainsKeyword(prompt, _settings.Persona2Keywords)
-            ? ChatPersona.Secondary
-            : ChatPersona.Main;
+        if (TryExtractSecondaryPersonaPrompt(prompt, out var strippedPrompt))
+        {
+            routedPrompt = strippedPrompt;
+            return ChatPersona.Secondary;
+        }
+
+        if (_settings.Persona2Keywords.Count > 0 &&
+            PersonaKeywordMatcher.ContainsKeyword(prompt, _settings.Persona2Keywords))
+        {
+            return ChatPersona.Secondary;
+        }
+
+        return ChatPersona.Main;
+    }
+
+    private bool TryExtractSecondaryPersonaPrompt(string prompt, out string strippedPrompt)
+    {
+        strippedPrompt = prompt;
+        var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            _settings.Persona2Name,
+            "persona2",
+            "p2",
+        };
+
+        foreach (var alias in aliases)
+        {
+            var trimmedAlias = alias.Trim();
+            if (trimmedAlias.Length == 0)
+            {
+                continue;
+            }
+
+            if (TryStripLeadingDirective(prompt, $"@{trimmedAlias}", out strippedPrompt) ||
+                TryStripLeadingDirective(prompt, $"/{trimmedAlias}", out strippedPrompt) ||
+                TryStripLeadingDirective(prompt, trimmedAlias, out strippedPrompt))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryStripLeadingDirective(string text, string directive, out string stripped)
+    {
+        stripped = text;
+        if (!text.StartsWith(directive, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var remainder = text[directive.Length..];
+        if (remainder.Length == 0)
+        {
+            stripped = string.Empty;
+            return true;
+        }
+
+        var separator = remainder[0];
+        if (separator != ':' && !char.IsWhiteSpace(separator))
+        {
+            return false;
+        }
+
+        if (separator == ':')
+        {
+            remainder = remainder[1..];
+        }
+
+        stripped = remainder.TrimStart();
+        return true;
     }
 
     private async Task ApplyRpcPresenceAsync()

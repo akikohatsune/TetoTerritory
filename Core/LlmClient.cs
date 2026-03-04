@@ -9,8 +9,10 @@ public sealed class LlmClient : IDisposable
 {
     private const string OverloadFallbackMessage = "i overload!";
     private const int MaxUpstreamAttempts = 4;
+    private const int MaxGroqUpstreamAttempts = 2;
     private const int BaseRetryDelayMs = 750;
     private const int MaxRetryDelayMs = 15_000;
+    private const int MaxErrorSnippetChars = 400;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -46,28 +48,13 @@ public sealed class LlmClient : IDisposable
         {
             var latestUserText = FindLatestUserText(messages);
             var systemPrompt = SystemPromptFactory.Build(profile.SystemPrompt, latestUserText);
-            return profile.Provider switch
-            {
-                "gemini" => await CallGeminiAsync(
-                    messages,
-                    systemPrompt,
-                    profile.GeminiApiKey,
-                    profile.GeminiModel,
-                    cancellationToken),
-                "groq" => await CallGroqAsync(
-                    messages,
-                    systemPrompt,
-                    profile.GroqApiKey,
-                    profile.GroqModel,
-                    cancellationToken),
-                "openai" => await CallOpenAiAsync(
-                    messages,
-                    systemPrompt,
-                    profile.OpenAiApiKey,
-                    profile.OpenAiModel,
-                    cancellationToken),
-                _ => throw new InvalidOperationException($"Unsupported provider: {profile.Provider}"),
-            };
+
+            var primaryTarget = BuildProviderTarget(profile, profile.Provider);
+            return await CallProviderAsync(
+                messages,
+                systemPrompt,
+                primaryTarget,
+                cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -99,6 +86,56 @@ public sealed class LlmClient : IDisposable
         _httpClient.Dispose();
     }
 
+    private async Task<string> CallProviderAsync(
+        IReadOnlyList<ChatMessage> messages,
+        string systemPrompt,
+        ProviderTarget target,
+        CancellationToken cancellationToken)
+    {
+        return target.Provider switch
+        {
+            "gemini" => await CallGeminiAsync(
+                messages,
+                systemPrompt,
+                target.ApiKey,
+                target.Model,
+                cancellationToken),
+            "groq" => await CallGroqAsync(
+                messages,
+                systemPrompt,
+                target.ApiKey,
+                target.Model,
+                cancellationToken),
+            "openai" => await CallOpenAiAsync(
+                messages,
+                systemPrompt,
+                target.ApiKey,
+                target.Model,
+                cancellationToken),
+            _ => throw new InvalidOperationException($"Unsupported provider: {target.Provider}"),
+        };
+    }
+
+    private static ProviderTarget BuildProviderTarget(LlmRuntimeProfile profile, string provider)
+    {
+        return provider switch
+        {
+            "gemini" => new ProviderTarget(
+                Provider: "gemini",
+                Model: profile.GeminiModel,
+                ApiKey: profile.GeminiApiKey),
+            "groq" => new ProviderTarget(
+                Provider: "groq",
+                Model: profile.GroqModel,
+                ApiKey: profile.GroqApiKey),
+            "openai" => new ProviderTarget(
+                Provider: "openai",
+                Model: profile.OpenAiModel,
+                ApiKey: profile.OpenAiApiKey),
+            _ => throw new InvalidOperationException($"Unsupported provider: {provider}"),
+        };
+    }
+
     private async Task<string> CallOpenAiAsync(
         IReadOnlyList<ChatMessage> messages,
         string systemPrompt,
@@ -117,6 +154,7 @@ public sealed class LlmClient : IDisposable
             model: model,
             systemPrompt: systemPrompt,
             messages: messages,
+            maxAttempts: MaxUpstreamAttempts,
             cancellationToken: cancellationToken);
     }
 
@@ -138,6 +176,7 @@ public sealed class LlmClient : IDisposable
             model: model,
             systemPrompt: systemPrompt,
             messages: messages,
+            maxAttempts: MaxGroqUpstreamAttempts,
             cancellationToken: cancellationToken);
     }
 
@@ -147,6 +186,7 @@ public sealed class LlmClient : IDisposable
         string model,
         string systemPrompt,
         IReadOnlyList<ChatMessage> messages,
+        int maxAttempts,
         CancellationToken cancellationToken)
     {
         var providerMessages = new List<object>
@@ -204,7 +244,7 @@ public sealed class LlmClient : IDisposable
             messages = providerMessages,
         };
 
-        using var doc = await PostJsonAsync(endpoint, payload, apiKey, cancellationToken);
+        using var doc = await PostJsonAsync(endpoint, payload, apiKey, maxAttempts, cancellationToken);
         if (!doc.RootElement.TryGetProperty("choices", out var choices) ||
             choices.ValueKind != JsonValueKind.Array ||
             choices.GetArrayLength() == 0)
@@ -298,7 +338,12 @@ public sealed class LlmClient : IDisposable
             },
         };
 
-        using var doc = await PostJsonAsync(endpoint, payload, bearerToken: null, cancellationToken);
+        using var doc = await PostJsonAsync(
+            endpoint,
+            payload,
+            bearerToken: null,
+            maxAttempts: MaxUpstreamAttempts,
+            cancellationToken);
         return ExtractGeminiText(doc.RootElement, "Gemini approval");
     }
 
@@ -363,7 +408,12 @@ public sealed class LlmClient : IDisposable
             },
         };
 
-        using var doc = await PostJsonAsync(endpoint, payload, bearerToken: null, cancellationToken);
+        using var doc = await PostJsonAsync(
+            endpoint,
+            payload,
+            bearerToken: null,
+            maxAttempts: MaxUpstreamAttempts,
+            cancellationToken);
         return ExtractGeminiText(doc.RootElement, "Gemini");
     }
 
@@ -467,9 +517,11 @@ public sealed class LlmClient : IDisposable
         string endpoint,
         object payload,
         string? bearerToken,
+        int maxAttempts,
         CancellationToken cancellationToken)
     {
-        for (var attempt = 1; attempt <= MaxUpstreamAttempts; attempt++)
+        var attemptLimit = Math.Max(1, maxAttempts);
+        for (var attempt = 1; attempt <= attemptLimit; attempt++)
         {
             try
             {
@@ -490,17 +542,24 @@ public sealed class LlmClient : IDisposable
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
-                    var snippet = body.Length <= 400 ? body : body[..400];
-                    if (!IsTransientStatusCode(response.StatusCode) || attempt == MaxUpstreamAttempts)
+                    var failureKind = ClassifyHttpFailure(response.StatusCode, body);
+                    var rateLimitInfo = BuildRateLimitInfo(response.Headers);
+                    var snippet = MakeBodySnippet(body);
+                    if (!IsTransientStatusCode(response.StatusCode))
                     {
-                        var suffix = attempt > 1 ? $" (after {attempt} attempts)" : string.Empty;
                         throw new InvalidOperationException(
-                            $"Upstream HTTP {(int)response.StatusCode} ({response.ReasonPhrase}){suffix}: {snippet}");
+                            $"Upstream HTTP {(int)response.StatusCode} ({response.ReasonPhrase}) kind={failureKind}; rate_limit={rateLimitInfo}; body={snippet}");
+                    }
+
+                    if (attempt == attemptLimit)
+                    {
+                        throw new UpstreamTransientException(
+                            $"Upstream HTTP {(int)response.StatusCode} ({response.ReasonPhrase}) kind={failureKind} (after {attempt} attempts); rate_limit={rateLimitInfo}; body={snippet}");
                     }
 
                     var delay = ComputeRetryDelay(attempt, response.Headers.RetryAfter);
                     Console.Error.WriteLine(
-                        $"[{DateTimeOffset.UtcNow:O}] [llm] transient upstream HTTP {(int)response.StatusCode} ({response.ReasonPhrase}) on attempt {attempt}/{MaxUpstreamAttempts}; retrying in {(int)delay.TotalMilliseconds}ms");
+                        $"[{DateTimeOffset.UtcNow:O}] [llm] transient upstream HTTP {(int)response.StatusCode} ({response.ReasonPhrase}) kind={failureKind} on attempt {attempt}/{attemptLimit}; retrying in {(int)delay.TotalMilliseconds}ms; rate_limit={rateLimitInfo}; body={snippet}");
                     await Task.Delay(delay, cancellationToken);
                     continue;
                 }
@@ -516,35 +575,132 @@ public sealed class LlmClient : IDisposable
                         ex);
                 }
             }
-            catch (HttpRequestException ex) when (attempt < MaxUpstreamAttempts)
+            catch (HttpRequestException ex) when (attempt < attemptLimit)
             {
                 var delay = ComputeRetryDelay(attempt, retryAfter: null);
                 Console.Error.WriteLine(
-                    $"[{DateTimeOffset.UtcNow:O}] [llm] transient upstream network error on attempt {attempt}/{MaxUpstreamAttempts}: {ex.Message}; retrying in {(int)delay.TotalMilliseconds}ms");
+                    $"[{DateTimeOffset.UtcNow:O}] [llm] transient upstream network error on attempt {attempt}/{attemptLimit}: {ex.Message}; retrying in {(int)delay.TotalMilliseconds}ms");
                 await Task.Delay(delay, cancellationToken);
             }
-            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested && attempt < MaxUpstreamAttempts)
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested && attempt < attemptLimit)
             {
                 var delay = ComputeRetryDelay(attempt, retryAfter: null);
                 Console.Error.WriteLine(
-                    $"[{DateTimeOffset.UtcNow:O}] [llm] upstream request timed out on attempt {attempt}/{MaxUpstreamAttempts}: {ex.Message}; retrying in {(int)delay.TotalMilliseconds}ms");
+                    $"[{DateTimeOffset.UtcNow:O}] [llm] upstream request timed out on attempt {attempt}/{attemptLimit}: {ex.Message}; retrying in {(int)delay.TotalMilliseconds}ms");
                 await Task.Delay(delay, cancellationToken);
             }
             catch (HttpRequestException ex)
             {
-                throw new InvalidOperationException(
-                    $"Upstream request failed after {MaxUpstreamAttempts} attempts: {ex.Message}",
+                throw new UpstreamTransientException(
+                    $"Upstream request failed after {attemptLimit} attempts: {ex.Message}",
                     ex);
             }
             catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
             {
-                throw new TimeoutException(
-                    $"Upstream request timed out after {MaxUpstreamAttempts} attempts.",
+                throw new UpstreamTransientException(
+                    $"Upstream request timed out after {attemptLimit} attempts.",
                     ex);
             }
         }
 
         throw new InvalidOperationException("Upstream request failed after retries.");
+    }
+
+    private static string MakeBodySnippet(string body)
+    {
+        var trimmed = body.Trim();
+        if (trimmed.Length == 0)
+        {
+            return "<empty>";
+        }
+
+        return trimmed.Length <= MaxErrorSnippetChars ? trimmed : trimmed[..MaxErrorSnippetChars];
+    }
+
+    private static string ClassifyHttpFailure(HttpStatusCode statusCode, string responseBody)
+    {
+        if (statusCode == HttpStatusCode.TooManyRequests)
+        {
+            return "rate_limit";
+        }
+
+        if (statusCode == HttpStatusCode.ServiceUnavailable)
+        {
+            if (ContainsInsensitive(responseBody, "over capacity"))
+            {
+                return "over_capacity";
+            }
+
+            return "service_unavailable";
+        }
+
+        if ((int)statusCode is >= 500 and <= 599)
+        {
+            return "upstream_server_error";
+        }
+
+        if ((int)statusCode is >= 400 and <= 499)
+        {
+            return "client_error";
+        }
+
+        return "unknown";
+    }
+
+    private static bool ContainsInsensitive(string value, string candidate)
+    {
+        return value.Contains(candidate, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildRateLimitInfo(HttpResponseHeaders headers)
+    {
+        var parts = new List<string>();
+        AppendHeaderIfPresent(parts, headers, "retry-after", "retry_after");
+        AppendHeaderIfPresent(parts, headers, "x-ratelimit-limit-requests", "limit_req");
+        AppendHeaderIfPresent(parts, headers, "x-ratelimit-remaining-requests", "rem_req");
+        AppendHeaderIfPresent(parts, headers, "x-ratelimit-reset-requests", "reset_req");
+        AppendHeaderIfPresent(parts, headers, "x-ratelimit-limit-tokens", "limit_tok");
+        AppendHeaderIfPresent(parts, headers, "x-ratelimit-remaining-tokens", "rem_tok");
+        AppendHeaderIfPresent(parts, headers, "x-ratelimit-reset-tokens", "reset_tok");
+        return parts.Count == 0 ? "none" : string.Join(",", parts);
+    }
+
+    private static void AppendHeaderIfPresent(
+        List<string> parts,
+        HttpResponseHeaders headers,
+        string headerName,
+        string label)
+    {
+        if (!headers.TryGetValues(headerName, out var values))
+        {
+            return;
+        }
+
+        var value = string.Join("|", values).Trim();
+        if (value.Length == 0)
+        {
+            return;
+        }
+
+        parts.Add($"{label}:{value}");
+    }
+
+    private sealed record ProviderTarget(
+        string Provider,
+        string Model,
+        string? ApiKey);
+
+    private sealed class UpstreamTransientException : Exception
+    {
+        public UpstreamTransientException(string message)
+            : base(message)
+        {
+        }
+
+        public UpstreamTransientException(string message, Exception innerException)
+            : base(message, innerException)
+        {
+        }
     }
 
     private static bool IsTransientStatusCode(HttpStatusCode statusCode)
