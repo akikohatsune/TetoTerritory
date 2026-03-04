@@ -75,6 +75,11 @@ internal sealed class ClearMemorySlashCommandHandler : ISlashCommandHandler
 
     public async Task HandleAsync(DiscordBot bot, SocketSlashCommand command)
     {
+        if (!await bot.EnsureOwnerPermissionAsync(command))
+        {
+            return;
+        }
+
         await bot.ClearChannelMemoryAsync(command.Channel.Id);
         await bot.RespondSlashAsync(command, "Cleared short-term memory for this channel.", ephemeral: true);
     }
