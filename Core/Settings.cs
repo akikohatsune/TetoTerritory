@@ -156,9 +156,9 @@ public sealed class Settings
         var persona2GroqModel = GetEnvString("GROQ_MODEL_2", groqModel);
         var persona2OpenAiModel = GetEnvString("OPENAI_MODEL_2", openAiModel);
 
-        var persona2GeminiApiKey = GetOptionalEnv("GEMINI_API_KEY_2") ?? geminiApiKey;
-        var persona2GroqApiKey = GetOptionalEnv("GROQ_API_KEY_2") ?? groqApiKey;
-        var persona2OpenAiApiKey = GetOptionalEnv("OPENAI_API_KEY_2") ?? openAiApiKey;
+        var persona2GeminiApiKey = GetOptionalEnv("GEMINI_API_KEY_2");
+        var persona2GroqApiKey = GetOptionalEnv("GROQ_API_KEY_2");
+        var persona2OpenAiApiKey = GetOptionalEnv("OPENAI_API_KEY_2");
 
         if (string.IsNullOrWhiteSpace(geminiApprovalModel))
         {
@@ -187,6 +187,16 @@ public sealed class Settings
                 persona2GroqApiKey,
                 persona2OpenAiApiKey,
                 "LLM_PROVIDER_2");
+
+            ValidateDistinctPersonaApiKey(
+                mainProvider: provider,
+                mainGeminiApiKey: geminiApiKey,
+                mainGroqApiKey: groqApiKey,
+                mainOpenAiApiKey: openAiApiKey,
+                persona2Provider: persona2Provider,
+                persona2GeminiApiKey: persona2GeminiApiKey,
+                persona2GroqApiKey: persona2GroqApiKey,
+                persona2OpenAiApiKey: persona2OpenAiApiKey);
 
             var mainSignature = BuildProviderSignature(
                 provider,
@@ -315,6 +325,47 @@ public sealed class Settings
             throw new InvalidOperationException(
                 $"Missing OPENAI_API_KEY for {providerEnvName}=openai (or chatgpt).");
         }
+    }
+
+    private static void ValidateDistinctPersonaApiKey(
+        string mainProvider,
+        string? mainGeminiApiKey,
+        string? mainGroqApiKey,
+        string? mainOpenAiApiKey,
+        string persona2Provider,
+        string? persona2GeminiApiKey,
+        string? persona2GroqApiKey,
+        string? persona2OpenAiApiKey)
+    {
+        if (!string.Equals(mainProvider, persona2Provider, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var mainKey = ResolveProviderApiKey(mainProvider, mainGeminiApiKey, mainGroqApiKey, mainOpenAiApiKey);
+        var persona2Key = ResolveProviderApiKey(persona2Provider, persona2GeminiApiKey, persona2GroqApiKey, persona2OpenAiApiKey);
+        if (!string.IsNullOrWhiteSpace(mainKey) &&
+            !string.IsNullOrWhiteSpace(persona2Key) &&
+            string.Equals(mainKey, persona2Key, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Main persona and PERSONA2 cannot share the same {mainProvider} API key. Set a different *_API_KEY_2 value.");
+        }
+    }
+
+    private static string? ResolveProviderApiKey(
+        string provider,
+        string? geminiApiKey,
+        string? groqApiKey,
+        string? openAiApiKey)
+    {
+        return provider switch
+        {
+            "gemini" => geminiApiKey,
+            "groq" => groqApiKey,
+            "openai" => openAiApiKey,
+            _ => null,
+        };
     }
 
     private static string BuildProviderSignature(
