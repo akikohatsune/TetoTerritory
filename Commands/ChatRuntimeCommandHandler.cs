@@ -9,8 +9,6 @@ internal sealed class ChatRuntimeCommandHandler : IDiscordCommandHandler
     {
         "chat",
         "ask",
-        "chat2",
-        "ask2",
         "clearmemo",
         "resetchat",
         "terminated",
@@ -28,22 +26,7 @@ internal sealed class ChatRuntimeCommandHandler : IDiscordCommandHandler
         {
             case "chat":
             case "ask":
-                await HandleChatAsync(
-                    bot,
-                    message,
-                    args,
-                    persona: ChatPersona.Main,
-                    trigger: "command");
-                return;
-
-            case "chat2":
-            case "ask2":
-                await HandleChatAsync(
-                    bot,
-                    message,
-                    args,
-                    persona: ChatPersona.Secondary,
-                    trigger: "command:persona2");
+                await HandleChatAsync(bot, message, args, trigger: "command");
                 return;
 
             case "clearmemo":
@@ -66,15 +49,8 @@ internal sealed class ChatRuntimeCommandHandler : IDiscordCommandHandler
         DiscordBot bot,
         SocketUserMessage message,
         string args,
-        ChatPersona persona,
         string trigger)
     {
-        if (!bot.IsPersonaEnabled(persona))
-        {
-            await bot.ReplyAsync(message, "Persona2 is disabled. Configure PERSONA2_* settings first.");
-            return;
-        }
-
         if (await bot.IsBannedAsync(message))
         {
             await bot.ReplyAsync(message, "You are banned from using the AI bot in this server.");
@@ -93,8 +69,7 @@ internal sealed class ChatRuntimeCommandHandler : IDiscordCommandHandler
             message,
             prompt: args,
             fallbackPrompt: DiscordBot.DefaultPrompt,
-            trigger: trigger,
-            persona: persona);
+            trigger: trigger);
     }
 
     private static async Task HandleTerminatedAsync(DiscordBot bot, SocketUserMessage message, string args)

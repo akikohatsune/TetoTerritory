@@ -19,7 +19,7 @@ internal sealed class TetoModelSlashCommandHandler : ISlashCommandHandler
     {
         var embed = new EmbedBuilder()
             .WithTitle("Teto Model")
-            .WithDescription(bot.BuildPersonaModelSummary())
+            .WithDescription($"Current model: `{bot.CurrentModelName()}`")
             .WithColor(Color.Magenta)
             .Build();
 

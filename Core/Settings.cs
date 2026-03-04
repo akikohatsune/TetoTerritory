@@ -43,6 +43,8 @@ public sealed class Settings
     public required string Persona2OpenAiModel { get; init; }
     public required string Persona2SystemPrompt { get; init; }
     public required string Persona2SystemRulesPath { get; init; }
+    public required string Persona2KeywordsPath { get; init; }
+    public required IReadOnlyList<string> Persona2Keywords { get; init; }
 
     public required string ChatReplayLogPath { get; init; }
     public required string ChatMemoryDbPath { get; init; }
@@ -124,6 +126,8 @@ public sealed class Settings
         var approvalGeminiApiKey = GetOptionalEnv("APPROVAL_GEMINI_API_KEY") ?? geminiApiKey;
 
         var persona2RulesPath = GetEnvString("SYSTEM_RULES_PATH_2", "system_rule2.md");
+        var persona2KeywordsPath = GetEnvString("PERSONA2_KEYWORDS_PATH", "persona2_keywords.md");
+        var persona2Keywords = LoadPersonaKeywords(persona2KeywordsPath);
         var persona2DefaultEnabled = File.Exists(Path.GetFullPath(persona2RulesPath));
         var persona2Enabled = GetEnvBool("PERSONA2_ENABLED", persona2DefaultEnabled);
         var persona2Name = GetEnvString("PERSONA2_NAME", "persona2");
@@ -171,6 +175,12 @@ public sealed class Settings
 
         if (persona2Enabled)
         {
+            if (persona2Keywords.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"PERSONA2_ENABLED=true but no keywords were loaded from {Path.GetFullPath(persona2KeywordsPath)}.");
+            }
+
             ValidateProviderKey(
                 persona2Provider,
                 persona2GeminiApiKey,
@@ -269,6 +279,8 @@ public sealed class Settings
             Persona2OpenAiModel = persona2OpenAiModel,
             Persona2SystemPrompt = fullSystemPrompt2,
             Persona2SystemRulesPath = persona2RulesPath,
+            Persona2KeywordsPath = persona2KeywordsPath,
+            Persona2Keywords = persona2Keywords,
             ChatReplayLogPath = GetEnvString("CHAT_REPLAY_LOG_PATH", "logger/chat_replay.jsonl"),
             ChatMemoryDbPath = GetEnvString("CHAT_MEMORY_DB_PATH", legacyMemoryDbPath),
             BanDbPath = GetEnvString("BAN_DB_PATH", "data/ban_control.db"),
@@ -439,5 +451,28 @@ public sealed class Settings
             $"Rules source: {path}\n" +
             "Rules Markdown:\n" +
             content;
+    }
+
+    private static IReadOnlyList<string> LoadPersonaKeywords(string pathValue)
+    {
+        var path = Path.GetFullPath(pathValue);
+        if (!File.Exists(path))
+        {
+            return Array.Empty<string>();
+        }
+
+        string content;
+        try
+        {
+            content = File.ReadAllText(path, Encoding.UTF8);
+        }
+        catch (IOException ex)
+        {
+            throw new InvalidOperationException(
+                $"Cannot read persona keyword file: {path}",
+                ex);
+        }
+
+        return PersonaKeywordMatcher.ParseMarkdownKeywords(content);
     }
 }

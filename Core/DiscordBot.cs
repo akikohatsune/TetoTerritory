@@ -69,8 +69,8 @@ public sealed class DiscordBot : IAsyncDisposable
             });
         var slashHandlers = new List<ISlashCommandHandler>
         {
-            new ChatSlashCommandHandler("chat", ChatPersona.Main),
-            new ChatSlashCommandHandler("ask", ChatPersona.Main),
+            new ChatSlashCommandHandler("chat"),
+            new ChatSlashCommandHandler("ask"),
             new ClearMemorySlashCommandHandler("clearmemo"),
             new ClearMemorySlashCommandHandler("resetchat"),
             new TerminatedSlashCommandHandler(),
@@ -86,12 +86,6 @@ public sealed class DiscordBot : IAsyncDisposable
             new CallProfileSlashCommandHandler("callprofile"),
             new TetoModelSlashCommandHandler(),
         };
-
-        if (_settings.Persona2Enabled)
-        {
-            slashHandlers.Add(new ChatSlashCommandHandler("chat2", ChatPersona.Secondary));
-            slashHandlers.Add(new ChatSlashCommandHandler("ask2", ChatPersona.Secondary));
-        }
 
         _slashCommandDispatcher = new SlashCommandDispatcher(slashHandlers);
 
@@ -328,17 +322,18 @@ public sealed class DiscordBot : IAsyncDisposable
         string prompt,
         string fallbackPrompt,
         string trigger,
-        ChatPersona persona = ChatPersona.Main)
+        ChatPersona? persona = null)
     {
-        if (!IsPersonaEnabled(persona))
+        var effectivePrompt = NormalizePrompt(prompt, fallbackPrompt);
+        var selectedPersona = persona ?? ResolvePersonaForPrompt(effectivePrompt);
+        if (!IsPersonaEnabled(selectedPersona))
         {
             await ReplyAsync(sourceMessage, "Requested persona is not enabled in current runtime.");
             return;
         }
 
-        var personaProfile = ResolvePersonaProfile(persona);
+        var personaProfile = ResolvePersonaProfile(selectedPersona);
         var personaMemoryKey = PersonaMemoryKey(personaProfile);
-        var effectivePrompt = NormalizePrompt(prompt, fallbackPrompt);
 
         string reply;
         var imageCount = 0;
@@ -413,22 +408,22 @@ public sealed class DiscordBot : IAsyncDisposable
         string prompt,
         string fallbackPrompt,
         string trigger,
-        ChatPersona persona = ChatPersona.Main)
+        ChatPersona? persona = null)
     {
-        if (!IsPersonaEnabled(persona))
+        var effectivePrompt = NormalizePrompt(prompt, fallbackPrompt);
+        var selectedPersona = persona ?? ResolvePersonaForPrompt(effectivePrompt);
+        if (!IsPersonaEnabled(selectedPersona))
         {
             await RespondSlashAsync(sourceCommand, "Requested persona is not enabled in current runtime.", ephemeral: true);
             return;
         }
 
-        var personaProfile = ResolvePersonaProfile(persona);
+        var personaProfile = ResolvePersonaProfile(selectedPersona);
         var personaMemoryKey = PersonaMemoryKey(personaProfile);
         if (!sourceCommand.HasResponded)
         {
             await sourceCommand.DeferAsync();
         }
-
-        var effectivePrompt = NormalizePrompt(prompt, fallbackPrompt);
 
         string reply;
         var imageCount = 0;
@@ -500,19 +495,9 @@ public sealed class DiscordBot : IAsyncDisposable
 
     internal string BuildProviderStatusMessage()
     {
-        var mainProfile = _settings.MainPersonaProfile;
-        var personaBits = new List<string>
-        {
-            $"Main persona: `{mainProfile.PersonaName}` ({mainProfile.Provider}/{ActiveChatModel(mainProfile)})",
-        };
-        if (_settings.SecondaryPersonaProfile is { } secondaryProfile)
-        {
-            personaBits.Add(
-                $"Persona2: `{secondaryProfile.PersonaName}` ({secondaryProfile.Provider}/{ActiveChatModel(secondaryProfile)})");
-        }
-
         return
-            $"{string.Join(" | ", personaBits)} | " +
+            $"Current provider: `{_settings.MainPersonaProfile.Provider}` | " +
+            $"Model: `{ActiveChatModel(_settings.MainPersonaProfile)}` | " +
             "Approval provider: `gemini` | " +
             $"Approval model: `{_settings.GeminiApprovalModel}` | " +
             $"Chat DB: `{_settings.ChatMemoryDbPath}` | " +
@@ -539,7 +524,9 @@ public sealed class DiscordBot : IAsyncDisposable
         if (_settings.SecondaryPersonaProfile is { } secondaryProfile)
         {
             lines.Add(
-                $"Persona2: `{secondaryProfile.PersonaName}` -> `{secondaryProfile.Provider}` / `{ActiveChatModel(secondaryProfile)}`");
+                $"Persona2 (hidden, keyword activated): `{secondaryProfile.PersonaName}` -> `{secondaryProfile.Provider}` / `{ActiveChatModel(secondaryProfile)}`");
+            lines.Add(
+                $"Persona2 keyword file: `{_settings.Persona2KeywordsPath}` | loaded keywords: `{_settings.Persona2Keywords.Count}`");
         }
 
         return string.Join('\n', lines);
@@ -876,6 +863,8 @@ public sealed class DiscordBot : IAsyncDisposable
                 Console.WriteLine($"Persona2 provider: {secondaryProfile.Provider}");
                 Console.WriteLine($"Persona2 model: {ActiveChatModel(secondaryProfile)}");
                 Console.WriteLine($"Persona2 system rules path: {_settings.Persona2SystemRulesPath}");
+                Console.WriteLine($"Persona2 keyword path: {_settings.Persona2KeywordsPath}");
+                Console.WriteLine($"Persona2 keyword count: {_settings.Persona2Keywords.Count}");
             }
 
             Console.WriteLine("Approval provider: gemini (fixed)");
@@ -1135,6 +1124,18 @@ public sealed class DiscordBot : IAsyncDisposable
         return profile.PersonaKey;
     }
 
+    private ChatPersona ResolvePersonaForPrompt(string prompt)
+    {
+        if (!_settings.Persona2Enabled || _settings.Persona2Keywords.Count == 0)
+        {
+            return ChatPersona.Main;
+        }
+
+        return PersonaKeywordMatcher.ContainsKeyword(prompt, _settings.Persona2Keywords)
+            ? ChatPersona.Secondary
+            : ChatPersona.Main;
+    }
+
     private async Task ApplyRpcPresenceAsync()
     {
         if (!_settings.RpcEnabled)
@@ -1299,8 +1300,12 @@ public sealed class DiscordBot : IAsyncDisposable
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             var registrations = _slashCommandDispatcher.BuildGlobalCommandRegistrations();
+            var desiredNames = registrations
+                .Select(r => r.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var created = new List<string>();
             var alreadyExists = new List<string>();
+            var removed = new List<string>();
 
             foreach (var registration in registrations)
             {
@@ -1314,10 +1319,37 @@ public sealed class DiscordBot : IAsyncDisposable
                 created.Add(registration.Name);
             }
 
+            var hiddenPersonaLegacyCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "chat2",
+                "ask2",
+            };
+            foreach (var command in existing)
+            {
+                if (desiredNames.Contains(command.Name))
+                {
+                    continue;
+                }
+
+                if (!hiddenPersonaLegacyCommands.Contains(command.Name))
+                {
+                    continue;
+                }
+
+                await command.DeleteAsync();
+                removed.Add(command.Name);
+            }
+
             if (created.Count > 0)
             {
                 var createdDisplay = string.Join(", ", created.Select(name => $"/{name}"));
                 Console.WriteLine($"Registered new slash commands: {createdDisplay}");
+            }
+
+            if (removed.Count > 0)
+            {
+                var removedDisplay = string.Join(", ", removed.Select(name => $"/{name}"));
+                Console.WriteLine($"Removed hidden persona legacy slash commands: {removedDisplay}");
             }
 
             if (alreadyExists.Count > 0)
