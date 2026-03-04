@@ -31,11 +31,12 @@ public sealed class LlmClient : IDisposable
     {
         try
         {
+            var systemPrompt = SystemPromptFactory.Build(_settings.SystemPrompt);
             return _settings.Provider switch
             {
-                "gemini" => await CallGeminiAsync(messages, cancellationToken),
-                "groq" => await CallGroqAsync(messages, cancellationToken),
-                "openai" => await CallOpenAiAsync(messages, cancellationToken),
+                "gemini" => await CallGeminiAsync(messages, systemPrompt, cancellationToken),
+                "groq" => await CallGroqAsync(messages, systemPrompt, cancellationToken),
+                "openai" => await CallOpenAiAsync(messages, systemPrompt, cancellationToken),
                 _ => throw new InvalidOperationException($"Unsupported provider: {_settings.Provider}"),
             };
         }
@@ -69,7 +70,10 @@ public sealed class LlmClient : IDisposable
         _httpClient.Dispose();
     }
 
-    private async Task<string> CallOpenAiAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken)
+    private async Task<string> CallOpenAiAsync(
+        IReadOnlyList<ChatMessage> messages,
+        string systemPrompt,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_settings.OpenAiApiKey))
         {
@@ -80,11 +84,15 @@ public sealed class LlmClient : IDisposable
             endpoint: "https://api.openai.com/v1/chat/completions",
             apiKey: _settings.OpenAiApiKey,
             model: _settings.OpenAiModel,
+            systemPrompt: systemPrompt,
             messages: messages,
             cancellationToken: cancellationToken);
     }
 
-    private async Task<string> CallGroqAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken)
+    private async Task<string> CallGroqAsync(
+        IReadOnlyList<ChatMessage> messages,
+        string systemPrompt,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_settings.GroqApiKey))
         {
@@ -95,6 +103,7 @@ public sealed class LlmClient : IDisposable
             endpoint: "https://api.groq.com/openai/v1/chat/completions",
             apiKey: _settings.GroqApiKey,
             model: _settings.GroqModel,
+            systemPrompt: systemPrompt,
             messages: messages,
             cancellationToken: cancellationToken);
     }
@@ -103,6 +112,7 @@ public sealed class LlmClient : IDisposable
         string endpoint,
         string apiKey,
         string model,
+        string systemPrompt,
         IReadOnlyList<ChatMessage> messages,
         CancellationToken cancellationToken)
     {
@@ -111,7 +121,7 @@ public sealed class LlmClient : IDisposable
             new
             {
                 role = "system",
-                content = _settings.SystemPrompt,
+                content = systemPrompt,
             },
         };
 
@@ -259,7 +269,10 @@ public sealed class LlmClient : IDisposable
         return ExtractGeminiText(doc.RootElement, "Gemini approval");
     }
 
-    private async Task<string> CallGeminiAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken)
+    private async Task<string> CallGeminiAsync(
+        IReadOnlyList<ChatMessage> messages,
+        string systemPrompt,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_settings.GeminiApiKey))
         {
@@ -310,7 +323,7 @@ public sealed class LlmClient : IDisposable
             {
                 parts = new object[]
                 {
-                    new { text = _settings.SystemPrompt },
+                    new { text = systemPrompt },
                 },
             },
         };
