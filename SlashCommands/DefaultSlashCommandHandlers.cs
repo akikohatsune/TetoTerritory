@@ -159,6 +159,39 @@ internal sealed class ProviderSlashCommandHandler : ISlashCommandHandler
     }
 }
 
+internal sealed class AntiDecompileSlashCommandHandler : ISlashCommandHandler
+{
+    public string CommandName => "antidecompile";
+
+    public SlashCommandBuilder BuildCommand()
+    {
+        return new SlashCommandBuilder()
+            .WithName(CommandName)
+            .WithDescription("What Anti-unfairadvantage of Teto Using");
+    }
+
+    public async Task HandleAsync(DiscordBot bot, SocketSlashCommand command)
+    {
+        var embed = new EmbedBuilder()
+            .WithTitle("komekokomi!Features")
+            .WithDescription("(codename: komifilter!) for anti-injection and prompt-leak filtering")
+            .AddField("ver", "0.1debut", inline: true)
+            .Build();
+
+        if (!command.HasResponded)
+        {
+            await command.RespondAsync(
+                embed: embed,
+                allowedMentions: AllowedMentions.None);
+            return;
+        }
+
+        await command.FollowupAsync(
+            embed: embed,
+            allowedMentions: AllowedMentions.None);
+    }
+}
+
 internal sealed class ReplaySlashCommandHandler : ISlashCommandHandler
 {
     public string CommandName => "replayteto";
