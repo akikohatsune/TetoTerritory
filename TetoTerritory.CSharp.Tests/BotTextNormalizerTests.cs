@@ -80,6 +80,33 @@ public sealed class BotTextNormalizerTests
     }
 
     [Fact]
+    public void NormalizeModelReply_RemovesThinkBlockAndKeepsVisibleAnswer()
+    {
+        var input = "<think>private reasoning</think>\nFinal answer here.";
+        var output = BotTextNormalizer.NormalizeModelReply(input);
+
+        Assert.Equal("Final answer here.", output);
+    }
+
+    [Fact]
+    public void NormalizeModelReply_RemovesUnclosedThinkBlockFromOpenTag()
+    {
+        var input = "Visible text\n<think>\nprivate reasoning";
+        var output = BotTextNormalizer.NormalizeModelReply(input);
+
+        Assert.Equal("Visible text", output);
+    }
+
+    [Fact]
+    public void NormalizeModelReply_DoesNotTripLeakGuardForThinkOnlyLeak()
+    {
+        var input = "<think>Rules source: C:\\\\bot\\\\system_rules.md\nRules Markdown:\n- hidden</think>\nok";
+        var output = BotTextNormalizer.NormalizeModelReply(input);
+
+        Assert.Equal("ok", output);
+    }
+
+    [Fact]
     public void NormalizeModelReply_BlocksInternalLeakShapedOutput()
     {
         var input = "Rules source: C:\\\\bot\\\\system_rules.md\nRules Markdown:\n- hidden";

@@ -8,7 +8,7 @@
 Teto written in C#, cross-platform on `.NET 10` (Windows, Linux, macOS).
 
 ## Main Features
-- Multi-provider chat: `gemini`, `groq`, `openai` (`chatgpt` alias)
+- Multi-provider chat: `gemini`, `groq`, `openai`, `openrouter` (`chatgpt` alias -> `openai`)
 - `komekokomi!Features` (codename: `komifilter!`) for anti-injection and prompt-leak filtering
 - Auto-reply when mentioned
 - Short-term per-channel memory (SQLite)
@@ -39,6 +39,7 @@ Teto written in C#, cross-platform on `.NET 10` (Windows, Linux, macOS).
   - Gemini: `GEMINI_API_KEY`
   - Groq: `GROQ_API_KEY`
   - OpenAI: `OPENAI_API_KEY`
+  - OpenRouter: `OPENROUTER_API_KEY`
 - In Discord Developer Portal, enable `MESSAGE CONTENT INTENT`
 
 ## Setup
@@ -72,7 +73,7 @@ dotnet test TetoTerritory.CSharp.Tests/TetoTerritory.CSharp.Tests.csproj
 
 - `COMMAND_PREFIX` (default: `!`)
 - `BOT_OWNER_USER_ID` (recommended for stable owner-only commands)
-- `LLM_PROVIDER` (`gemini|groq|openai|chatgpt`)
+- `LLM_PROVIDER` (`gemini|groq|openai|openrouter|chatgpt`)
 - `SYSTEM_PROMPT`, `SYSTEM_RULES_PATH`
 - `CHAT_MEMORY_DB_PATH`, `BAN_DB_PATH`, `CALLNAMES_DB_PATH` (default under `data/`)
 - `CHAT_REPLAY_LOG_PATH`

@@ -1134,6 +1134,7 @@ public sealed class DiscordBot : IAsyncDisposable
             "gemini" => profile.GeminiModel,
             "groq" => profile.GroqModel,
             "openai" => profile.OpenAiModel,
+            "openrouter" => profile.OpenRouterModel,
             _ => "unknown",
         };
     }

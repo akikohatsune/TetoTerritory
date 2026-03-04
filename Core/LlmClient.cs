@@ -112,6 +112,12 @@ public sealed class LlmClient : IDisposable
                 target.ApiKey,
                 target.Model,
                 cancellationToken),
+            "openrouter" => await CallOpenRouterAsync(
+                messages,
+                systemPrompt,
+                target.ApiKey,
+                target.Model,
+                cancellationToken),
             _ => throw new InvalidOperationException($"Unsupported provider: {target.Provider}"),
         };
     }
@@ -132,6 +138,10 @@ public sealed class LlmClient : IDisposable
                 Provider: "openai",
                 Model: profile.OpenAiModel,
                 ApiKey: profile.OpenAiApiKey),
+            "openrouter" => new ProviderTarget(
+                Provider: "openrouter",
+                Model: profile.OpenRouterModel,
+                ApiKey: profile.OpenRouterApiKey),
             _ => throw new InvalidOperationException($"Unsupported provider: {provider}"),
         };
     }
@@ -177,6 +187,28 @@ public sealed class LlmClient : IDisposable
             systemPrompt: systemPrompt,
             messages: messages,
             maxAttempts: MaxGroqUpstreamAttempts,
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task<string> CallOpenRouterAsync(
+        IReadOnlyList<ChatMessage> messages,
+        string systemPrompt,
+        string? apiKey,
+        string model,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            throw new InvalidOperationException("Missing OPENROUTER_API_KEY for selected persona.");
+        }
+
+        return await CallOpenAiCompatibleChatAsync(
+            endpoint: "https://openrouter.ai/api/v1/chat/completions",
+            apiKey: apiKey,
+            model: model,
+            systemPrompt: systemPrompt,
+            messages: messages,
+            maxAttempts: MaxUpstreamAttempts,
             cancellationToken: cancellationToken);
     }
 

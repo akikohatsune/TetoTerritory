@@ -42,6 +42,7 @@ public static class PromptInjectionGuard
         "rules source:",
         "discord_token=",
         "openai_api_key=",
+        "openrouter_api_key=",
         "gemini_api_key=",
         "groq_api_key=",
         "approval_gemini_api_key=",

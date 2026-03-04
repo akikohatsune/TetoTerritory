@@ -16,7 +16,9 @@ public sealed record LlmRuntimeProfile(
     string? GroqApiKey,
     string GroqModel,
     string? OpenAiApiKey,
-    string OpenAiModel);
+    string OpenAiModel,
+    string? OpenRouterApiKey,
+    string OpenRouterModel);
 
 public sealed record ImageInput(string MimeType, string DataB64);
 

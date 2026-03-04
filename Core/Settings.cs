@@ -9,6 +9,7 @@ public sealed class Settings
     private const string DefaultGeminiApprovalModel = "gemini-3-flash";
     private const string DefaultGroqModel = "llama-3.3-70b-versatile";
     private const string DefaultOpenAiModel = "gpt-4o-mini";
+    private const string DefaultOpenRouterModel = "openai/gpt-4o-mini";
 
     public required string DiscordToken { get; init; }
     public required string CommandPrefix { get; init; }
@@ -28,6 +29,8 @@ public sealed class Settings
     public required string GroqModel { get; init; }
     public string? OpenAiApiKey { get; init; }
     public required string OpenAiModel { get; init; }
+    public string? OpenRouterApiKey { get; init; }
+    public required string OpenRouterModel { get; init; }
 
     public required string SystemPrompt { get; init; }
     public required string SystemRulesPath { get; init; }
@@ -41,6 +44,8 @@ public sealed class Settings
     public required string Persona2GroqModel { get; init; }
     public string? Persona2OpenAiApiKey { get; init; }
     public required string Persona2OpenAiModel { get; init; }
+    public string? Persona2OpenRouterApiKey { get; init; }
+    public required string Persona2OpenRouterModel { get; init; }
     public required string Persona2SystemPrompt { get; init; }
     public required string Persona2SystemRulesPath { get; init; }
     public required string Persona2KeywordsPath { get; init; }
@@ -67,7 +72,9 @@ public sealed class Settings
             GroqApiKey: GroqApiKey,
             GroqModel: GroqModel,
             OpenAiApiKey: OpenAiApiKey,
-            OpenAiModel: OpenAiModel);
+            OpenAiModel: OpenAiModel,
+            OpenRouterApiKey: OpenRouterApiKey,
+            OpenRouterModel: OpenRouterModel);
 
     public LlmRuntimeProfile? SecondaryPersonaProfile
     {
@@ -88,7 +95,9 @@ public sealed class Settings
                 GroqApiKey: Persona2GroqApiKey,
                 GroqModel: Persona2GroqModel,
                 OpenAiApiKey: Persona2OpenAiApiKey,
-                OpenAiModel: Persona2OpenAiModel);
+                OpenAiModel: Persona2OpenAiModel,
+                OpenRouterApiKey: Persona2OpenRouterApiKey,
+                OpenRouterModel: Persona2OpenRouterModel);
         }
     }
 
@@ -119,10 +128,12 @@ public sealed class Settings
         var geminiApprovalModel = GetEnvString("GEMINI_APPROVAL_MODEL", DefaultGeminiApprovalModel);
         var groqModel = GetEnvString("GROQ_MODEL", DefaultGroqModel);
         var openAiModel = GetEnvString("OPENAI_MODEL", DefaultOpenAiModel);
+        var openRouterModel = GetEnvString("OPENROUTER_MODEL", DefaultOpenRouterModel);
 
         var geminiApiKey = GetOptionalEnv("GEMINI_API_KEY");
         var groqApiKey = GetOptionalEnv("GROQ_API_KEY");
         var openAiApiKey = GetOptionalEnv("OPENAI_API_KEY");
+        var openRouterApiKey = GetOptionalEnv("OPENROUTER_API_KEY");
         var approvalGeminiApiKey = GetOptionalEnv("APPROVAL_GEMINI_API_KEY") ?? geminiApiKey;
 
         var persona2RulesPath = GetEnvString("SYSTEM_RULES_PATH_2", "system_rule2.md");
@@ -140,6 +151,8 @@ public sealed class Settings
         {
             "gemini" => "groq",
             "groq" => "openai",
+            "openai" => "openrouter",
+            "openrouter" => "gemini",
             _ => "gemini",
         };
         var persona2Provider = NormalizeProvider(
@@ -155,17 +168,19 @@ public sealed class Settings
         var persona2GeminiModel = GetEnvString("GEMINI_MODEL_2", geminiModel);
         var persona2GroqModel = GetEnvString("GROQ_MODEL_2", groqModel);
         var persona2OpenAiModel = GetEnvString("OPENAI_MODEL_2", openAiModel);
+        var persona2OpenRouterModel = GetEnvString("OPENROUTER_MODEL_2", openRouterModel);
 
         var persona2GeminiApiKey = GetOptionalEnv("GEMINI_API_KEY_2");
         var persona2GroqApiKey = GetOptionalEnv("GROQ_API_KEY_2");
         var persona2OpenAiApiKey = GetOptionalEnv("OPENAI_API_KEY_2");
+        var persona2OpenRouterApiKey = GetOptionalEnv("OPENROUTER_API_KEY_2");
 
         if (string.IsNullOrWhiteSpace(geminiApprovalModel))
         {
             throw new InvalidOperationException("GEMINI_APPROVAL_MODEL cannot be empty.");
         }
 
-        ValidateProviderKey(provider, geminiApiKey, groqApiKey, openAiApiKey, "LLM_PROVIDER");
+        ValidateProviderKey(provider, geminiApiKey, groqApiKey, openAiApiKey, openRouterApiKey, "LLM_PROVIDER");
 
         if (string.IsNullOrWhiteSpace(approvalGeminiApiKey))
         {
@@ -186,6 +201,7 @@ public sealed class Settings
                 persona2GeminiApiKey,
                 persona2GroqApiKey,
                 persona2OpenAiApiKey,
+                persona2OpenRouterApiKey,
                 "LLM_PROVIDER_2");
 
             ValidateDistinctPersonaApiKey(
@@ -193,21 +209,25 @@ public sealed class Settings
                 mainGeminiApiKey: geminiApiKey,
                 mainGroqApiKey: groqApiKey,
                 mainOpenAiApiKey: openAiApiKey,
+                mainOpenRouterApiKey: openRouterApiKey,
                 persona2Provider: persona2Provider,
                 persona2GeminiApiKey: persona2GeminiApiKey,
                 persona2GroqApiKey: persona2GroqApiKey,
-                persona2OpenAiApiKey: persona2OpenAiApiKey);
+                persona2OpenAiApiKey: persona2OpenAiApiKey,
+                persona2OpenRouterApiKey: persona2OpenRouterApiKey);
 
             var mainSignature = BuildProviderSignature(
                 provider,
                 geminiModel,
                 groqModel,
-                openAiModel);
+                openAiModel,
+                openRouterModel);
             var persona2Signature = BuildProviderSignature(
                 persona2Provider,
                 persona2GeminiModel,
                 persona2GroqModel,
-                persona2OpenAiModel);
+                persona2OpenAiModel,
+                persona2OpenRouterModel);
             if (string.Equals(mainSignature, persona2Signature, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException(
@@ -276,6 +296,8 @@ public sealed class Settings
             GroqModel = groqModel,
             OpenAiApiKey = openAiApiKey,
             OpenAiModel = openAiModel,
+            OpenRouterApiKey = openRouterApiKey,
+            OpenRouterModel = openRouterModel,
             SystemPrompt = fullSystemPrompt,
             SystemRulesPath = systemRulesPath,
             Persona2Enabled = persona2Enabled,
@@ -287,6 +309,8 @@ public sealed class Settings
             Persona2GroqModel = persona2GroqModel,
             Persona2OpenAiApiKey = persona2OpenAiApiKey,
             Persona2OpenAiModel = persona2OpenAiModel,
+            Persona2OpenRouterApiKey = persona2OpenRouterApiKey,
+            Persona2OpenRouterModel = persona2OpenRouterModel,
             Persona2SystemPrompt = fullSystemPrompt2,
             Persona2SystemRulesPath = persona2RulesPath,
             Persona2KeywordsPath = persona2KeywordsPath,
@@ -308,6 +332,7 @@ public sealed class Settings
         string? geminiApiKey,
         string? groqApiKey,
         string? openAiApiKey,
+        string? openRouterApiKey,
         string providerEnvName)
     {
         if (provider == "gemini" && string.IsNullOrWhiteSpace(geminiApiKey))
@@ -325,6 +350,11 @@ public sealed class Settings
             throw new InvalidOperationException(
                 $"Missing OPENAI_API_KEY for {providerEnvName}=openai (or chatgpt).");
         }
+
+        if (provider == "openrouter" && string.IsNullOrWhiteSpace(openRouterApiKey))
+        {
+            throw new InvalidOperationException($"Missing OPENROUTER_API_KEY for {providerEnvName}=openrouter.");
+        }
     }
 
     private static void ValidateDistinctPersonaApiKey(
@@ -332,18 +362,20 @@ public sealed class Settings
         string? mainGeminiApiKey,
         string? mainGroqApiKey,
         string? mainOpenAiApiKey,
+        string? mainOpenRouterApiKey,
         string persona2Provider,
         string? persona2GeminiApiKey,
         string? persona2GroqApiKey,
-        string? persona2OpenAiApiKey)
+        string? persona2OpenAiApiKey,
+        string? persona2OpenRouterApiKey)
     {
         if (!string.Equals(mainProvider, persona2Provider, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
-        var mainKey = ResolveProviderApiKey(mainProvider, mainGeminiApiKey, mainGroqApiKey, mainOpenAiApiKey);
-        var persona2Key = ResolveProviderApiKey(persona2Provider, persona2GeminiApiKey, persona2GroqApiKey, persona2OpenAiApiKey);
+        var mainKey = ResolveProviderApiKey(mainProvider, mainGeminiApiKey, mainGroqApiKey, mainOpenAiApiKey, mainOpenRouterApiKey);
+        var persona2Key = ResolveProviderApiKey(persona2Provider, persona2GeminiApiKey, persona2GroqApiKey, persona2OpenAiApiKey, persona2OpenRouterApiKey);
         if (!string.IsNullOrWhiteSpace(mainKey) &&
             !string.IsNullOrWhiteSpace(persona2Key) &&
             string.Equals(mainKey, persona2Key, StringComparison.Ordinal))
@@ -357,13 +389,15 @@ public sealed class Settings
         string provider,
         string? geminiApiKey,
         string? groqApiKey,
-        string? openAiApiKey)
+        string? openAiApiKey,
+        string? openRouterApiKey)
     {
         return provider switch
         {
             "gemini" => geminiApiKey,
             "groq" => groqApiKey,
             "openai" => openAiApiKey,
+            "openrouter" => openRouterApiKey,
             _ => null,
         };
     }
@@ -372,9 +406,10 @@ public sealed class Settings
         string provider,
         string geminiModel,
         string groqModel,
-        string openAiModel)
+        string openAiModel,
+        string openRouterModel)
     {
-        var activeModel = ResolveActiveModel(provider, geminiModel, groqModel, openAiModel);
+        var activeModel = ResolveActiveModel(provider, geminiModel, groqModel, openAiModel, openRouterModel);
         return $"{provider}:{activeModel}";
     }
 
@@ -382,13 +417,15 @@ public sealed class Settings
         string provider,
         string geminiModel,
         string groqModel,
-        string openAiModel)
+        string openAiModel,
+        string openRouterModel)
     {
         return provider switch
         {
             "gemini" => geminiModel,
             "groq" => groqModel,
             "openai" => openAiModel,
+            "openrouter" => openRouterModel,
             _ => throw new InvalidOperationException($"Unsupported provider: {provider}"),
         };
     }
@@ -401,10 +438,10 @@ public sealed class Settings
             provider = "openai";
         }
 
-        if (provider is not ("gemini" or "groq" or "openai"))
+        if (provider is not ("gemini" or "groq" or "openai" or "openrouter"))
         {
             throw new InvalidOperationException(
-                $"{variableName} must be one of: gemini, groq, openai, chatgpt.");
+                $"{variableName} must be one of: gemini, groq, openai, openrouter, chatgpt.");
         }
 
         return provider;
