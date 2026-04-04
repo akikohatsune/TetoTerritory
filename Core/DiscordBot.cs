@@ -462,6 +462,9 @@ public sealed class DiscordBot : IAsyncDisposable
                 guildId: guildId,
                 userId: sourceCommand.User.Id);
 
+            var images = await ExtractImagesFromSlashCommandAsync(sourceCommand);
+            imageCount = images.Count;
+
             var history = await _chatMemory.GetHistoryAsync(
                 sourceCommand.Channel.Id,
                 personaMemoryKey);
@@ -475,7 +478,7 @@ public sealed class DiscordBot : IAsyncDisposable
             {
                 Role = "user",
                 Content = promptForLlm,
-                Images = new List<ImageInput>(),
+                Images = images,
             });
 
             var rawReply = await GenerateReplyByPersonaAsync(selectedPersona, llmMessages, personaProfile);
@@ -513,6 +516,32 @@ public sealed class DiscordBot : IAsyncDisposable
             replyLength: reply.Length);
 
         await SendLongSlashMessageAsync(sourceCommand, reply);
+    }
+
+    private async Task<List<ImageInput>> ExtractImagesFromSlashCommandAsync(SocketSlashCommand command)
+    {
+        var images = new List<ImageInput>();
+        var attachment = SlashOptionReader.GetAttachment(command, "image");
+        if (attachment is null)
+        {
+            return images;
+        }
+
+        var mimeType = (attachment.ContentType ?? GuessMimeType(attachment.Filename)).ToLowerInvariant();
+        if (!mimeType.StartsWith("image/", StringComparison.Ordinal))
+        {
+            return images;
+        }
+
+        if (attachment.Size > _settings.ImageMaxBytes)
+        {
+            throw new InvalidOperationException(
+                $"Image '{attachment.Filename}' exceeds the limit of {_settings.ImageMaxBytes} bytes.");
+        }
+
+        var data = await _httpClient.GetByteArrayAsync(attachment.Url);
+        images.Add(new ImageInput(mimeType, Convert.ToBase64String(data)));
+        return images;
     }
 
     internal Task ClearChannelMemoryAsync(ulong channelId)
@@ -871,14 +900,17 @@ public sealed class DiscordBot : IAsyncDisposable
             await ApplyRpcPresenceAsync();
             await RegisterSlashCommandsAsync();
 
-            try
+            if (!_ownerUserId.HasValue)
             {
-                var appInfo = await _client.GetApplicationInfoAsync();
-                _ownerUserId = appInfo.Owner?.Id ?? _ownerUserId;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Failed to resolve owner via application info: {ex.Message}");
+                try
+                {
+                    var appInfo = await _client.GetApplicationInfoAsync();
+                    _ownerUserId = appInfo.Owner?.Id;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to resolve owner via application info: {ex.Message}");
+                }
             }
 
             var user = _client.CurrentUser;

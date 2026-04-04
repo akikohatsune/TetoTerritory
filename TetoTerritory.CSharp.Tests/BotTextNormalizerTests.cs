@@ -72,6 +72,28 @@ public sealed class BotTextNormalizerTests
     }
 
     [Fact]
+    public void LatexToPlainMath_HandlesDelimitersButKeepsCurrency()
+    {
+        var input = @"Math: $x + y = z$ and $$a^2 + b^2 = c^2$$ and Price: $100.";
+        var output = BotTextNormalizer.LatexToPlainMath(input);
+
+        Assert.Contains("x + y = z", output);
+        Assert.Contains("a^2 + b^2 = c^2", output);
+        Assert.Contains("$100.", output);
+        Assert.DoesNotContain("$x + y = z$", output);
+    }
+
+    [Fact]
+    public void LatexToPlainMath_HandlesParenDelimiters()
+    {
+        var input = @"Math: \(E = mc^2\) and \[F = ma\].";
+        var output = BotTextNormalizer.LatexToPlainMath(input);
+
+        Assert.Contains("E = mc^2", output);
+        Assert.Contains("F = ma", output);
+    }
+
+    [Fact]
     public void NormalizeModelReply_PlainTextUnchanged()
     {
         var input = "just plain text";

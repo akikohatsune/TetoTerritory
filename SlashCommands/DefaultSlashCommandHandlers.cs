@@ -24,12 +24,18 @@ internal sealed class ChatSlashCommandHandler : ISlashCommandHandler
                 name: "prompt",
                 type: ApplicationCommandOptionType.String,
                 description: "What you want to ask",
+                isRequired: false)
+            .AddOption(
+                name: "image",
+                type: ApplicationCommandOptionType.Attachment,
+                description: "Optional image for vision-enabled models",
                 isRequired: false);
     }
 
     public async Task HandleAsync(DiscordBot bot, SocketSlashCommand command)
     {
         var prompt = SlashOptionReader.GetString(command, "prompt", fallback: string.Empty);
+        var attachment = SlashOptionReader.GetAttachment(command, "image");
         var guildId = bot.GetGuildId(command);
 
         if (await bot.IsBannedAsync(guildId, command.User.Id))
@@ -466,6 +472,12 @@ internal static class SlashOptionReader
     {
         var value = GetOptionValue(command, optionName);
         return value as SocketUser;
+    }
+
+    public static IAttachment? GetAttachment(SocketSlashCommand command, string optionName)
+    {
+        var value = GetOptionValue(command, optionName);
+        return value as IAttachment;
     }
 
     private static object? GetOptionValue(SocketSlashCommand command, string optionName)

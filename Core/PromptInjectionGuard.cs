@@ -58,7 +58,7 @@ public static class PromptInjectionGuard
         var suspicious = LooksLikeInjection(normalized);
         var hasDelimitedSegment = HasDelimitedSegment(normalized);
 
-        var lines = new List<string>(6);
+        var lines = new List<string>(9);
         if (suspicious)
         {
             lines.Add("[komifilter_security_notice]");
