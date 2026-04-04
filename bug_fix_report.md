@@ -64,5 +64,16 @@ This report details the bugs found in the TetoTerritory C# codebase and the fixe
   - Added a `Mandatory Output` instruction to the system prompt, forcing the model to provide at least a breakdown or explanation instead of staying silent.
   - Bumped version to `0.2.1patch`.
 
+## 10. Enhancement: OpenRouter Headers and Typo Fix
+- **Location:** `Core/LlmClient.cs`
+- **Description:** 
+  - Improved OpenRouter integration by adding recommended metadata headers (`HTTP-Referer`, `X-Title`).
+  - Fixed a typo in `BuildProviderTarget` where an undefined variable `target` was referenced in an exception message.
+- **Fix:**
+  - Updated `PostJsonAsync` and `CallOpenAiCompatibleChatAsync` to support custom headers.
+  - Added OpenRouter-specific header population.
+  - Corrected `target.Provider` to `provider` in the exception handler.
+- **Version:** `0.2.2patch`
+
 ---
 *Fixed by Gemini CLI*

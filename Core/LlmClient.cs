@@ -202,6 +202,12 @@ public sealed class LlmClient : IDisposable
             throw new InvalidOperationException("Missing OPENROUTER_API_KEY for selected persona.");
         }
 
+        var headers = new Dictionary<string, string>
+        {
+            { "HTTP-Referer", "https://github.com/akikohatsune/TetoTerritory" },
+            { "X-Title", "TetoTerritory" },
+        };
+
         return await CallOpenAiCompatibleChatAsync(
             endpoint: "https://openrouter.ai/api/v1/chat/completions",
             apiKey: apiKey,
@@ -209,6 +215,7 @@ public sealed class LlmClient : IDisposable
             systemPrompt: systemPrompt,
             messages: messages,
             maxAttempts: MaxUpstreamAttempts,
+            headers: headers,
             cancellationToken: cancellationToken);
     }
 
@@ -219,6 +226,7 @@ public sealed class LlmClient : IDisposable
         string systemPrompt,
         IReadOnlyList<ChatMessage> messages,
         int maxAttempts,
+        Dictionary<string, string>? headers,
         CancellationToken cancellationToken)
     {
         var providerMessages = new List<object>
@@ -276,7 +284,13 @@ public sealed class LlmClient : IDisposable
             messages = providerMessages,
         };
 
-        using var doc = await PostJsonAsync(endpoint, payload, apiKey, maxAttempts, cancellationToken);
+        using var doc = await PostJsonAsync(
+            endpoint,
+            payload,
+            apiKey,
+            maxAttempts,
+            headers,
+            cancellationToken);
         if (!doc.RootElement.TryGetProperty("choices", out var choices) ||
             choices.ValueKind != JsonValueKind.Array ||
             choices.GetArrayLength() == 0)
@@ -378,6 +392,7 @@ public sealed class LlmClient : IDisposable
             payload,
             bearerToken: null,
             maxAttempts: MaxUpstreamAttempts,
+            headers: null,
             cancellationToken);
         return ExtractGeminiText(doc.RootElement, "Gemini approval");
     }
@@ -448,6 +463,7 @@ public sealed class LlmClient : IDisposable
             payload,
             bearerToken: null,
             maxAttempts: MaxUpstreamAttempts,
+            headers: null,
             cancellationToken);
         return ExtractGeminiText(doc.RootElement, "Gemini");
     }
@@ -553,6 +569,7 @@ public sealed class LlmClient : IDisposable
         object payload,
         string? bearerToken,
         int maxAttempts,
+        Dictionary<string, string>? headers,
         CancellationToken cancellationToken)
     {
         var attemptLimit = Math.Max(1, maxAttempts);
@@ -571,6 +588,14 @@ public sealed class LlmClient : IDisposable
                 if (!string.IsNullOrWhiteSpace(bearerToken))
                 {
                     request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+                }
+
+                if (headers != null)
+                {
+                    foreach (var header in headers)
+                    {
+                        request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                    }
                 }
 
                 using var response = await _httpClient.SendAsync(request, cancellationToken);
