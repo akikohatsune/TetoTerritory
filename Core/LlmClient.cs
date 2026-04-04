@@ -187,6 +187,7 @@ public sealed class LlmClient : IDisposable
             systemPrompt: systemPrompt,
             messages: messages,
             maxAttempts: MaxUpstreamAttempts,
+            headers: null,
             cancellationToken: cancellationToken);
     }
 
@@ -209,6 +210,7 @@ public sealed class LlmClient : IDisposable
             systemPrompt: systemPrompt,
             messages: messages,
             maxAttempts: MaxGroqUpstreamAttempts,
+            headers: null,
             cancellationToken: cancellationToken);
     }
 

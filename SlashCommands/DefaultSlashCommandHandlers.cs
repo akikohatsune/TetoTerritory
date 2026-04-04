@@ -181,7 +181,7 @@ internal sealed class VersionSlashCommandHandler : ISlashCommandHandler
         var embed = new EmbedBuilder()
             .WithTitle("TetoTerritory")
             .WithDescription("A playful Discord bot powered by various LLMs.")
-            .AddField("Version", "0.2.3patch", inline: true)
+            .AddField("Version", "0.2.4patch", inline: true)
             .AddField("Environment", ".NET 10", inline: true)
             .AddField("Provider", bot.Settings.Provider, inline: true)
             .WithFooter("komekokomi!Features enabled")
@@ -213,7 +213,7 @@ internal sealed class AntiDecompileSlashCommandHandler : ISlashCommandHandler
         var embed = new EmbedBuilder()
             .WithTitle("komekokomi!Features")
             .WithDescription("(codename: komifilter!) for anti-injection and prompt-leak filtering")
-            .AddField("ver", "0.2.3patch", inline: true)
+            .AddField("ver", "0.2.4patch", inline: true)
             .Build();
 
         if (!command.HasResponded)

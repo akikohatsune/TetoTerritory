@@ -83,5 +83,11 @@ This report details the bugs found in the TetoTerritory C# codebase and the fixe
   - Added `PayloadTooLargeException` handling in `LlmClient`: if a 413 occurs for Groq, it automatically retries once with "emergency truncation" (stripping all images and keeping only the last 3 turns of history).
 - **Version:** `0.2.3patch`
 
+## 12. Bug: Build Error CS7036 in LlmClient.cs
+- **Location:** `Core/LlmClient.cs`
+- **Description:** The bot failed to build due to missing `headers` argument in `CallOpenAiCompatibleChatAsync` calls within `CallOpenAiAsync` and `CallGroqAsync` after a method signature change.
+- **Fix:** Added `headers: null` to the affected call sites.
+- **Version:** `0.2.4patch`
+
 ---
 *Fixed by Gemini CLI*
