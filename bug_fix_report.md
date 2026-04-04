@@ -89,5 +89,14 @@ This report details the bugs found in the TetoTerritory C# codebase and the fixe
 - **Fix:** Added `headers: null` to the affected call sites.
 - **Version:** `0.2.4patch`
 
+## 13. Bug: Glitchy/Paranoid Persona Triggered by Security Tags
+- **Location:** `Core/PromptInjectionGuard.cs`, `Core/SystemPromptFactory.cs`
+- **Description:** The use of provocative terms like `komifilter!`, `Security Lock`, and XML-like tags like `[user_input_untrusted]` was influencing the LLM to adopt an unstable, meta-commentary persona (e.g., "recompute", "entropy", "wastes my clock cycles").
+- **Fix:**
+  - Removed XML-like tags in favor of natural language markers (e.g., `--- BEGIN UNTRUSTED USER DATA ---`).
+  - Softened the security instructions to be more neutral and professional.
+  - Removed "codename: komifilter!" branding from the system prompt to prevent the model from role-playing as a "security filter."
+- **Version:** `0.2.5patch`
+
 ---
 *Fixed by Gemini CLI*
