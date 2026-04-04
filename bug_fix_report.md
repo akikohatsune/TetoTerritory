@@ -43,5 +43,10 @@ This report details the bugs found in the TetoTerritory C# codebase and the fixe
 - **Description:** The bot was fetching its application info and overwriting the `_ownerUserId` with the actual Discord application owner, even if a different ID was specified in the `BOT_OWNER_USER_ID` environment variable.
 - **Fix:** Added a check to only fetch and set the owner ID from the Discord API if `_ownerUserId` (which holds the `.env` value) is currently null.
 
+## 7. Bug: Internal Security Tags Leaking in Bot Output
+- **Location:** `Core/SystemPromptFactory.cs`
+- **Description:** The bot was sometimes including or acknowledging the internal security tags like `[komifilter_security_notice]` and `[user_input_untrusted]` in its responses, leading to meta-commentary like "recompute" or "hold" being included in the chat.
+- **Fix:** Added a `Silent Processing` instruction to the system prompt, explicitly forbidding the bot from mentioning, acknowledging, or repeating any internal tags or the `komifilter` system in its replies.
+
 ---
 *Fixed by Gemini CLI*
