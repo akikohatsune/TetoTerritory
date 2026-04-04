@@ -75,5 +75,13 @@ This report details the bugs found in the TetoTerritory C# codebase and the fixe
   - Corrected `target.Provider` to `provider` in the exception handler.
 - **Version:** `0.2.2patch`
 
+## 11. Bug: Groq HTTP 413 (Payload Too Large)
+- **Location:** `Core/LlmClient.cs`, `Core/DiscordBot.cs`
+- **Description:** Groq has much stricter request size limits than other providers, causing calls with large images or long histories to fail with `Upstream HTTP 413`.
+- **Fix:**
+  - Implemented dynamic image size limits in `DiscordBot`: Groq is now limited to 1MB per image, while others keep the default 5MB.
+  - Added `PayloadTooLargeException` handling in `LlmClient`: if a 413 occurs for Groq, it automatically retries once with "emergency truncation" (stripping all images and keeping only the last 3 turns of history).
+- **Version:** `0.2.3patch`
+
 ---
 *Fixed by Gemini CLI*

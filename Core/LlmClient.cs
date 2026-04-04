@@ -50,11 +50,33 @@ public sealed class LlmClient : IDisposable
             var systemPrompt = SystemPromptFactory.Build(profile.SystemPrompt, latestUserText);
 
             var primaryTarget = BuildProviderTarget(profile, profile.Provider);
-            return await CallProviderAsync(
-                messages,
-                systemPrompt,
-                primaryTarget,
-                cancellationToken);
+            try
+            {
+                return await CallProviderAsync(
+                    messages,
+                    systemPrompt,
+                    primaryTarget,
+                    cancellationToken);
+            }
+            catch (PayloadTooLargeException) when (profile.Provider == "groq")
+            {
+                // Groq has strict payload limits. Retry with truncated history and NO images.
+                Console.Error.WriteLine(
+                    $"[{DateTimeOffset.UtcNow:O}] [llm] provider=groq HTTP 413; retrying with emergency truncation (recent history only, no images).");
+
+                var truncated = messages
+                    .Where(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(m.Role, "assistant", StringComparison.OrdinalIgnoreCase))
+                    .Select(m => new ChatMessage { Role = m.Role, Content = m.Content }) // Strip images
+                    .TakeLast(3) // Only keep last 3 turns
+                    .ToList();
+
+                return await CallProviderAsync(
+                    truncated,
+                    systemPrompt,
+                    primaryTarget,
+                    cancellationToken);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -607,6 +629,12 @@ public sealed class LlmClient : IDisposable
                     var snippet = MakeBodySnippet(body);
                     if (!IsTransientStatusCode(response.StatusCode))
                     {
+                        if (response.StatusCode == HttpStatusCode.RequestEntityTooLarge)
+                        {
+                            throw new PayloadTooLargeException(
+                                $"Upstream HTTP 413 (Payload Too Large) kind={failureKind}; rate_limit={rateLimitInfo}; body={snippet}");
+                        }
+
                         throw new InvalidOperationException(
                             $"Upstream HTTP {(int)response.StatusCode} ({response.ReasonPhrase}) kind={failureKind}; rate_limit={rateLimitInfo}; body={snippet}");
                     }
@@ -759,6 +787,14 @@ public sealed class LlmClient : IDisposable
 
         public UpstreamTransientException(string message, Exception innerException)
             : base(message, innerException)
+        {
+        }
+    }
+
+    private sealed class PayloadTooLargeException : Exception
+    {
+        public PayloadTooLargeException(string message)
+            : base(message)
         {
         }
     }

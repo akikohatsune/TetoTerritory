@@ -358,7 +358,8 @@ public sealed class DiscordBot : IAsyncDisposable
         {
             try
             {
-                var images = await ExtractImagesFromMessageAsync(sourceMessage);
+                var maxBytes = personaProfile.Provider == "groq" ? 1024 * 1024 : _settings.ImageMaxBytes;
+                var images = await ExtractImagesFromMessageAsync(sourceMessage, maxBytes);
                 imageCount = images.Count;
                 var guildId = GetGuildId(sourceMessage);
                 var promptForLlm = await ApplyCallPreferencesToPromptAsync(
@@ -463,7 +464,8 @@ public sealed class DiscordBot : IAsyncDisposable
                 guildId: guildId,
                 userId: sourceCommand.User.Id);
 
-            var images = await ExtractImagesFromSlashCommandAsync(sourceCommand);
+            var maxBytes = personaProfile.Provider == "groq" ? 1024 * 1024 : _settings.ImageMaxBytes;
+            var images = await ExtractImagesFromSlashCommandAsync(sourceCommand, maxBytes);
             imageCount = images.Count;
 
             var history = await _chatMemory.GetHistoryAsync(
@@ -519,7 +521,7 @@ public sealed class DiscordBot : IAsyncDisposable
         await SendLongSlashMessageAsync(sourceCommand, reply);
     }
 
-    private async Task<List<ImageInput>> ExtractImagesFromSlashCommandAsync(SocketSlashCommand command)
+    private async Task<List<ImageInput>> ExtractImagesFromSlashCommandAsync(SocketSlashCommand command, int maxBytes)
     {
         var images = new List<ImageInput>();
         var attachment = SlashOptionReader.GetAttachment(command, "image");
@@ -534,10 +536,10 @@ public sealed class DiscordBot : IAsyncDisposable
             return images;
         }
 
-        if (attachment.Size > _settings.ImageMaxBytes)
+        if (attachment.Size > maxBytes)
         {
             throw new InvalidOperationException(
-                $"Image '{attachment.Filename}' exceeds the limit of {_settings.ImageMaxBytes} bytes.");
+                $"Image '{attachment.Filename}' exceeds the limit of {maxBytes} bytes.");
         }
 
         var data = await _httpClient.GetByteArrayAsync(attachment.Url);
@@ -1020,7 +1022,7 @@ public sealed class DiscordBot : IAsyncDisposable
             trigger: "mention");
     }
 
-    private async Task<List<ImageInput>> ExtractImagesFromMessageAsync(SocketUserMessage message)
+    private async Task<List<ImageInput>> ExtractImagesFromMessageAsync(SocketUserMessage message, int maxBytes)
     {
         var images = new List<ImageInput>();
         foreach (var attachment in message.Attachments)
@@ -1031,10 +1033,10 @@ public sealed class DiscordBot : IAsyncDisposable
                 continue;
             }
 
-            if (attachment.Size > _settings.ImageMaxBytes)
+            if (attachment.Size > maxBytes)
             {
                 throw new InvalidOperationException(
-                    $"Image '{attachment.Filename}' exceeds the limit of {_settings.ImageMaxBytes} bytes.");
+                    $"Image '{attachment.Filename}' exceeds the limit of {maxBytes} bytes.");
             }
 
             var data = await _httpClient.GetByteArrayAsync(attachment.Url);
