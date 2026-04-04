@@ -165,6 +165,38 @@ internal sealed class ProviderSlashCommandHandler : ISlashCommandHandler
     }
 }
 
+internal sealed class VersionSlashCommandHandler : ISlashCommandHandler
+{
+    public string CommandName => "ver";
+
+    public SlashCommandBuilder BuildCommand()
+    {
+        return new SlashCommandBuilder()
+            .WithName(CommandName)
+            .WithDescription("Show Teto bot version and build info.");
+    }
+
+    public async Task HandleAsync(DiscordBot bot, SocketSlashCommand command)
+    {
+        var embed = new EmbedBuilder()
+            .WithTitle("TetoTerritory")
+            .WithDescription("A playful Discord bot powered by various LLMs.")
+            .AddField("Version", "0.2stable", inline: true)
+            .AddField("Environment", ".NET 10", inline: true)
+            .AddField("Provider", bot.Settings.Provider, inline: true)
+            .WithFooter("komekokomi!Features enabled")
+            .Build();
+
+        if (!command.HasResponded)
+        {
+            await command.RespondAsync(embed: embed);
+            return;
+        }
+
+        await command.FollowupAsync(embed: embed);
+    }
+}
+
 internal sealed class AntiDecompileSlashCommandHandler : ISlashCommandHandler
 {
     public string CommandName => "antidecompile";
@@ -181,7 +213,7 @@ internal sealed class AntiDecompileSlashCommandHandler : ISlashCommandHandler
         var embed = new EmbedBuilder()
             .WithTitle("komekokomi!Features")
             .WithDescription("(codename: komifilter!) for anti-injection and prompt-leak filtering")
-            .AddField("ver", "0.1debut", inline: true)
+            .AddField("ver", "0.2stable", inline: true)
             .Build();
 
         if (!command.HasResponded)

@@ -48,5 +48,13 @@ This report details the bugs found in the TetoTerritory C# codebase and the fixe
 - **Description:** The bot was sometimes including or acknowledging the internal security tags like `[komifilter_security_notice]` and `[user_input_untrusted]` in its responses, leading to meta-commentary like "recompute" or "hold" being included in the chat.
 - **Fix:** Added a `Silent Processing` instruction to the system prompt, explicitly forbidding the bot from mentioning, acknowledging, or repeating any internal tags or the `komifilter` system in its replies.
 
+## 8. Feature: Added /ver Slash Command and Version Bump
+- **Location:** `SlashCommands/DefaultSlashCommandHandlers.cs`, `Core/DiscordBot.cs`
+- **Description:** Added a dedicated `/ver` slash command to display the bot's current version, environment, and provider. Also updated the existing `antidecompile` command to reflect the new version number.
+- **Fix/Enhancement:**
+  - Implemented `VersionSlashCommandHandler`.
+  - Registered `/ver` in `DiscordBot`.
+  - Bumped version from `0.1debut` to `0.2stable`.
+
 ---
 *Fixed by Gemini CLI*

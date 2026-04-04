@@ -79,6 +79,7 @@ public sealed class DiscordBot : IAsyncDisposable
             new ClearMemorySlashCommandHandler("resetchat"),
             new TerminatedSlashCommandHandler(),
             new ProviderSlashCommandHandler(),
+            new VersionSlashCommandHandler(),
             new AntiDecompileSlashCommandHandler(),
             new ReplaySlashCommandHandler(),
             new BanSlashCommandHandler(),
