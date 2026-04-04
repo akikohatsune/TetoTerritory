@@ -310,10 +310,13 @@ public sealed class LlmClient : IDisposable
                 }
 
                 if (part.TryGetProperty("text", out var textProp) &&
-                    textProp.ValueKind == JsonValueKind.String &&
-                    !string.IsNullOrWhiteSpace(textProp.GetString()))
+                    textProp.ValueKind == JsonValueKind.String)
                 {
-                    textParts.Add(textProp.GetString()!.Trim());
+                    var pText = textProp.GetString()?.Trim();
+                    if (!string.IsNullOrEmpty(pText))
+                    {
+                        textParts.Add(pText);
+                    }
                 }
             }
 
@@ -323,7 +326,7 @@ public sealed class LlmClient : IDisposable
             }
         }
 
-        throw new InvalidOperationException("Provider returned an empty response.");
+        return "i couldn't generate a reply for that (it might have been filtered or the model returned empty).";
     }
 
     private async Task<string> ApproveCallNameWithGeminiAsync(string fieldName, string value, CancellationToken cancellationToken)

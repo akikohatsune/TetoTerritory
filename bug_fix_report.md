@@ -56,5 +56,13 @@ This report details the bugs found in the TetoTerritory C# codebase and the fixe
   - Registered `/ver` in `DiscordBot`.
   - Bumped version from `0.1debut` to `0.2stable`.
 
+## 9. Bug: Empty Model Reply (no content) for Complex Math/Physics
+- **Location:** `Core/LlmClient.cs`, `Core/SystemPromptFactory.cs`
+- **Description:** Some models (especially via Groq/OpenAI providers) were returning empty or filtered responses for complex mathematical or physics queries (like "Tìm điện dung của tụ điện..."), resulting in the bot displaying `(no content)`.
+- **Fix:**
+  - Improved `LlmClient` to catch empty responses and provide a clearer error message.
+  - Added a `Mandatory Output` instruction to the system prompt, forcing the model to provide at least a breakdown or explanation instead of staying silent.
+  - Bumped version to `0.2.1patch`.
+
 ---
 *Fixed by Gemini CLI*
