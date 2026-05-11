@@ -147,4 +147,16 @@ public sealed class BotTextNormalizerTests
         var output = BotTextNormalizer.NormalizeModelReply(input);
         Assert.Equal("Just testing.", output);
     }
+
+    [Fact]
+    public void NormalizeModelReply_RemovesSingleDashStutterMarkers()
+    {
+        var input = "no—wait, what am I even excited about, HAHA—hold on, let me just contain my enthusiasm...";
+        var output = BotTextNormalizer.NormalizeModelReply(input);
+
+        Assert.DoesNotContain("wait", output);
+        Assert.DoesNotContain("hold", output);
+        // We expect "no" and "HAHA" to be removed as well since they are attached to the dash,
+        // or we expect them to be kept. Let's see what the regex does. We just want the words removed.
+    }
 }

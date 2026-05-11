@@ -17,8 +17,8 @@ public static class BotTextNormalizer
         @"<\s*/\s*think\s*>",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KomiFilterMarkerPattern = new(
-        @"\w*—\w+—",
-        RegexOptions.Compiled);
+        @"(?:\b\w+)?—(?:wait|recompute|hold(?:\s+on)?)[—\s,]*",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public static string SanitizeMentions(string text)
     {
