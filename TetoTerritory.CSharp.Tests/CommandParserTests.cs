@@ -54,9 +54,16 @@ public sealed class CommandParserTests
     }
 
     [Fact]
-    public void ExtractUserId_PrefersMentionedUserList()
+    public void ExtractUserId_PrioritizesTokenOverMentions()
     {
         var userId = CommandParser.ExtractUserId("<@999>", new[] { 123UL, 456UL });
+        Assert.Equal(999UL, userId);
+    }
+
+    [Fact]
+    public void ExtractUserId_FallbacksToMentionIfTokenInvalid()
+    {
+        var userId = CommandParser.ExtractUserId("@random", new[] { 123UL, 456UL });
         Assert.Equal(123UL, userId);
     }
 

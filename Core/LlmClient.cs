@@ -50,11 +50,33 @@ public sealed class LlmClient : IDisposable
             var systemPrompt = SystemPromptFactory.Build(profile.SystemPrompt, latestUserText);
 
             var primaryTarget = BuildProviderTarget(profile, profile.Provider);
-            return await CallProviderAsync(
-                messages,
-                systemPrompt,
-                primaryTarget,
-                cancellationToken);
+            try
+            {
+                return await CallProviderAsync(
+                    messages,
+                    systemPrompt,
+                    primaryTarget,
+                    cancellationToken);
+            }
+            catch (PayloadTooLargeException) when (profile.Provider == "groq")
+            {
+                // Groq has strict payload limits. Retry with truncated history and NO images.
+                Console.Error.WriteLine(
+                    $"[{DateTimeOffset.UtcNow:O}] [llm] provider=groq HTTP 413; retrying with emergency truncation (recent history only, no images).");
+
+                var truncated = messages
+                    .Where(m => string.Equals(m.Role, "user", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(m.Role, "assistant", StringComparison.OrdinalIgnoreCase))
+                    .Select(m => new ChatMessage { Role = m.Role, Content = m.Content }) // Strip images
+                    .TakeLast(3) // Only keep last 3 turns
+                    .ToList();
+
+                return await CallProviderAsync(
+                    truncated,
+                    systemPrompt,
+                    primaryTarget,
+                    cancellationToken);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -165,6 +187,7 @@ public sealed class LlmClient : IDisposable
             systemPrompt: systemPrompt,
             messages: messages,
             maxAttempts: MaxUpstreamAttempts,
+            headers: null,
             cancellationToken: cancellationToken);
     }
 
@@ -187,6 +210,7 @@ public sealed class LlmClient : IDisposable
             systemPrompt: systemPrompt,
             messages: messages,
             maxAttempts: MaxGroqUpstreamAttempts,
+            headers: null,
             cancellationToken: cancellationToken);
     }
 
@@ -202,6 +226,12 @@ public sealed class LlmClient : IDisposable
             throw new InvalidOperationException("Missing OPENROUTER_API_KEY for selected persona.");
         }
 
+        var headers = new Dictionary<string, string>
+        {
+            { "HTTP-Referer", "https://github.com/akikohatsune/TetoTerritory" },
+            { "X-Title", "TetoTerritory" },
+        };
+
         return await CallOpenAiCompatibleChatAsync(
             endpoint: "https://openrouter.ai/api/v1/chat/completions",
             apiKey: apiKey,
@@ -209,6 +239,7 @@ public sealed class LlmClient : IDisposable
             systemPrompt: systemPrompt,
             messages: messages,
             maxAttempts: MaxUpstreamAttempts,
+            headers: headers,
             cancellationToken: cancellationToken);
     }
 
@@ -219,6 +250,7 @@ public sealed class LlmClient : IDisposable
         string systemPrompt,
         IReadOnlyList<ChatMessage> messages,
         int maxAttempts,
+        Dictionary<string, string>? headers,
         CancellationToken cancellationToken)
     {
         var providerMessages = new List<object>
@@ -276,7 +308,13 @@ public sealed class LlmClient : IDisposable
             messages = providerMessages,
         };
 
-        using var doc = await PostJsonAsync(endpoint, payload, apiKey, maxAttempts, cancellationToken);
+        using var doc = await PostJsonAsync(
+            endpoint,
+            payload,
+            apiKey,
+            maxAttempts,
+            headers,
+            cancellationToken);
         if (!doc.RootElement.TryGetProperty("choices", out var choices) ||
             choices.ValueKind != JsonValueKind.Array ||
             choices.GetArrayLength() == 0)
@@ -310,10 +348,13 @@ public sealed class LlmClient : IDisposable
                 }
 
                 if (part.TryGetProperty("text", out var textProp) &&
-                    textProp.ValueKind == JsonValueKind.String &&
-                    !string.IsNullOrWhiteSpace(textProp.GetString()))
+                    textProp.ValueKind == JsonValueKind.String)
                 {
-                    textParts.Add(textProp.GetString()!.Trim());
+                    var pText = textProp.GetString()?.Trim();
+                    if (!string.IsNullOrEmpty(pText))
+                    {
+                        textParts.Add(pText);
+                    }
                 }
             }
 
@@ -323,7 +364,7 @@ public sealed class LlmClient : IDisposable
             }
         }
 
-        throw new InvalidOperationException("Provider returned an empty response.");
+        return "i couldn't generate a reply for that (it might have been filtered or the model returned empty).";
     }
 
     private async Task<string> ApproveCallNameWithGeminiAsync(string fieldName, string value, CancellationToken cancellationToken)
@@ -375,6 +416,7 @@ public sealed class LlmClient : IDisposable
             payload,
             bearerToken: null,
             maxAttempts: MaxUpstreamAttempts,
+            headers: null,
             cancellationToken);
         return ExtractGeminiText(doc.RootElement, "Gemini approval");
     }
@@ -445,6 +487,7 @@ public sealed class LlmClient : IDisposable
             payload,
             bearerToken: null,
             maxAttempts: MaxUpstreamAttempts,
+            headers: null,
             cancellationToken);
         return ExtractGeminiText(doc.RootElement, "Gemini");
     }
@@ -550,6 +593,7 @@ public sealed class LlmClient : IDisposable
         object payload,
         string? bearerToken,
         int maxAttempts,
+        Dictionary<string, string>? headers,
         CancellationToken cancellationToken)
     {
         var attemptLimit = Math.Max(1, maxAttempts);
@@ -570,6 +614,14 @@ public sealed class LlmClient : IDisposable
                     request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
                 }
 
+                if (headers != null)
+                {
+                    foreach (var header in headers)
+                    {
+                        request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                    }
+                }
+
                 using var response = await _httpClient.SendAsync(request, cancellationToken);
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
                 if (!response.IsSuccessStatusCode)
@@ -579,6 +631,12 @@ public sealed class LlmClient : IDisposable
                     var snippet = MakeBodySnippet(body);
                     if (!IsTransientStatusCode(response.StatusCode))
                     {
+                        if (response.StatusCode == HttpStatusCode.RequestEntityTooLarge)
+                        {
+                            throw new PayloadTooLargeException(
+                                $"Upstream HTTP 413 (Payload Too Large) kind={failureKind}; rate_limit={rateLimitInfo}; body={snippet}");
+                        }
+
                         throw new InvalidOperationException(
                             $"Upstream HTTP {(int)response.StatusCode} ({response.ReasonPhrase}) kind={failureKind}; rate_limit={rateLimitInfo}; body={snippet}");
                     }
@@ -731,6 +789,14 @@ public sealed class LlmClient : IDisposable
 
         public UpstreamTransientException(string message, Exception innerException)
             : base(message, innerException)
+        {
+        }
+    }
+
+    private sealed class PayloadTooLargeException : Exception
+    {
+        public PayloadTooLargeException(string message)
+            : base(message)
         {
         }
     }

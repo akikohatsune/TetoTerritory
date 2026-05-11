@@ -79,6 +79,7 @@ public sealed class DiscordBot : IAsyncDisposable
             new ClearMemorySlashCommandHandler("resetchat"),
             new TerminatedSlashCommandHandler(),
             new ProviderSlashCommandHandler(),
+            new VersionSlashCommandHandler(),
             new AntiDecompileSlashCommandHandler(),
             new ReplaySlashCommandHandler(),
             new BanSlashCommandHandler(),
@@ -357,7 +358,8 @@ public sealed class DiscordBot : IAsyncDisposable
         {
             try
             {
-                var images = await ExtractImagesFromMessageAsync(sourceMessage);
+                var maxBytes = personaProfile.Provider == "groq" ? 1024 * 1024 : _settings.ImageMaxBytes;
+                var images = await ExtractImagesFromMessageAsync(sourceMessage, maxBytes);
                 imageCount = images.Count;
                 var guildId = GetGuildId(sourceMessage);
                 var promptForLlm = await ApplyCallPreferencesToPromptAsync(
@@ -462,6 +464,10 @@ public sealed class DiscordBot : IAsyncDisposable
                 guildId: guildId,
                 userId: sourceCommand.User.Id);
 
+            var maxBytes = personaProfile.Provider == "groq" ? 1024 * 1024 : _settings.ImageMaxBytes;
+            var images = await ExtractImagesFromSlashCommandAsync(sourceCommand, maxBytes);
+            imageCount = images.Count;
+
             var history = await _chatMemory.GetHistoryAsync(
                 sourceCommand.Channel.Id,
                 personaMemoryKey);
@@ -475,7 +481,7 @@ public sealed class DiscordBot : IAsyncDisposable
             {
                 Role = "user",
                 Content = promptForLlm,
-                Images = new List<ImageInput>(),
+                Images = images,
             });
 
             var rawReply = await GenerateReplyByPersonaAsync(selectedPersona, llmMessages, personaProfile);
@@ -513,6 +519,32 @@ public sealed class DiscordBot : IAsyncDisposable
             replyLength: reply.Length);
 
         await SendLongSlashMessageAsync(sourceCommand, reply);
+    }
+
+    private async Task<List<ImageInput>> ExtractImagesFromSlashCommandAsync(SocketSlashCommand command, int maxBytes)
+    {
+        var images = new List<ImageInput>();
+        var attachment = SlashOptionReader.GetAttachment(command, "image");
+        if (attachment is null)
+        {
+            return images;
+        }
+
+        var mimeType = (attachment.ContentType ?? GuessMimeType(attachment.Filename)).ToLowerInvariant();
+        if (!mimeType.StartsWith("image/", StringComparison.Ordinal))
+        {
+            return images;
+        }
+
+        if (attachment.Size > maxBytes)
+        {
+            throw new InvalidOperationException(
+                $"Image '{attachment.Filename}' exceeds the limit of {maxBytes} bytes.");
+        }
+
+        var data = await _httpClient.GetByteArrayAsync(attachment.Url);
+        images.Add(new ImageInput(mimeType, Convert.ToBase64String(data)));
+        return images;
     }
 
     internal Task ClearChannelMemoryAsync(ulong channelId)
@@ -871,14 +903,17 @@ public sealed class DiscordBot : IAsyncDisposable
             await ApplyRpcPresenceAsync();
             await RegisterSlashCommandsAsync();
 
-            try
+            if (!_ownerUserId.HasValue)
             {
-                var appInfo = await _client.GetApplicationInfoAsync();
-                _ownerUserId = appInfo.Owner?.Id ?? _ownerUserId;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Failed to resolve owner via application info: {ex.Message}");
+                try
+                {
+                    var appInfo = await _client.GetApplicationInfoAsync();
+                    _ownerUserId = appInfo.Owner?.Id;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to resolve owner via application info: {ex.Message}");
+                }
             }
 
             var user = _client.CurrentUser;
@@ -987,7 +1022,7 @@ public sealed class DiscordBot : IAsyncDisposable
             trigger: "mention");
     }
 
-    private async Task<List<ImageInput>> ExtractImagesFromMessageAsync(SocketUserMessage message)
+    private async Task<List<ImageInput>> ExtractImagesFromMessageAsync(SocketUserMessage message, int maxBytes)
     {
         var images = new List<ImageInput>();
         foreach (var attachment in message.Attachments)
@@ -998,10 +1033,10 @@ public sealed class DiscordBot : IAsyncDisposable
                 continue;
             }
 
-            if (attachment.Size > _settings.ImageMaxBytes)
+            if (attachment.Size > maxBytes)
             {
                 throw new InvalidOperationException(
-                    $"Image '{attachment.Filename}' exceeds the limit of {_settings.ImageMaxBytes} bytes.");
+                    $"Image '{attachment.Filename}' exceeds the limit of {maxBytes} bytes.");
             }
 
             var data = await _httpClient.GetByteArrayAsync(attachment.Url);

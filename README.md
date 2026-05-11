@@ -24,7 +24,7 @@ Teto written in C#, cross-platform on `.NET 10` (Windows, Linux, macOS).
 - Runtime controls: `!clearmemo`, `!resetchat`, `!terminated on|off|status`, `!provider`
 - Slash commands (in addition to prefix commands):
   - `/chat`, `/ask`
-  - `/provider`, `/tetomodel`
+  - `/provider`, `/tetomodel`, `/ver`
   - `/clearmemo`, `/resetchat`, `/terminated`
   - `/replayteto` (owner only)
   - `/ban`, `/removeban` (owner only)

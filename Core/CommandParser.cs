@@ -56,23 +56,33 @@ public sealed class CommandParser
 
     public static ulong? ExtractUserId(string token, IEnumerable<ulong> mentionedUserIds)
     {
-        var firstMention = mentionedUserIds.FirstOrDefault();
-        if (firstMention != 0)
-        {
-            return firstMention;
-        }
-
         var cleaned = token.Trim();
         if (cleaned.StartsWith("<@!", StringComparison.Ordinal) && cleaned.EndsWith('>'))
         {
-            cleaned = cleaned[3..^1];
+            var idPart = cleaned[3..^1];
+            if (ulong.TryParse(idPart, out var userId))
+            {
+                return userId;
+            }
         }
         else if (cleaned.StartsWith("<@", StringComparison.Ordinal) && cleaned.EndsWith('>'))
         {
-            cleaned = cleaned[2..^1];
+            var idPart = cleaned[2..^1];
+            if (ulong.TryParse(idPart, out var userId))
+            {
+                return userId;
+            }
         }
 
-        return ulong.TryParse(cleaned, out var userId) ? userId : null;
+        if (ulong.TryParse(cleaned, out var rawId))
+        {
+            return rawId;
+        }
+
+        // Fallback to first mention only if the token itself doesn't yield a valid ID
+        // but it looks like it might have been intended as a mention (e.g. "@user").
+        var first = mentionedUserIds.FirstOrDefault();
+        return first != 0 ? first : null;
     }
 
     public static bool TryParseFirstToken(string input, out string firstToken, out string? remainder)

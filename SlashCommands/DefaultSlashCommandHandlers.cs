@@ -24,12 +24,18 @@ internal sealed class ChatSlashCommandHandler : ISlashCommandHandler
                 name: "prompt",
                 type: ApplicationCommandOptionType.String,
                 description: "What you want to ask",
+                isRequired: false)
+            .AddOption(
+                name: "image",
+                type: ApplicationCommandOptionType.Attachment,
+                description: "Optional image for vision-enabled models",
                 isRequired: false);
     }
 
     public async Task HandleAsync(DiscordBot bot, SocketSlashCommand command)
     {
         var prompt = SlashOptionReader.GetString(command, "prompt", fallback: string.Empty);
+        var attachment = SlashOptionReader.GetAttachment(command, "image");
         var guildId = bot.GetGuildId(command);
 
         if (await bot.IsBannedAsync(guildId, command.User.Id))
@@ -159,6 +165,38 @@ internal sealed class ProviderSlashCommandHandler : ISlashCommandHandler
     }
 }
 
+internal sealed class VersionSlashCommandHandler : ISlashCommandHandler
+{
+    public string CommandName => "ver";
+
+    public SlashCommandBuilder BuildCommand()
+    {
+        return new SlashCommandBuilder()
+            .WithName(CommandName)
+            .WithDescription("Show Teto bot version and build info.");
+    }
+
+    public async Task HandleAsync(DiscordBot bot, SocketSlashCommand command)
+    {
+        var embed = new EmbedBuilder()
+            .WithTitle("TetoTerritory")
+            .WithDescription("A playful Discord bot powered by various LLMs.")
+            .AddField("Version", "0.2.5patch", inline: true)
+            .AddField("Environment", ".NET 10", inline: true)
+            .AddField("Provider", bot.Settings.Provider, inline: true)
+            .WithFooter("komekokomi!Features enabled")
+            .Build();
+
+        if (!command.HasResponded)
+        {
+            await command.RespondAsync(embed: embed);
+            return;
+        }
+
+        await command.FollowupAsync(embed: embed);
+    }
+}
+
 internal sealed class AntiDecompileSlashCommandHandler : ISlashCommandHandler
 {
     public string CommandName => "antidecompile";
@@ -175,7 +213,7 @@ internal sealed class AntiDecompileSlashCommandHandler : ISlashCommandHandler
         var embed = new EmbedBuilder()
             .WithTitle("komekokomi!Features")
             .WithDescription("(codename: komifilter!) for anti-injection and prompt-leak filtering")
-            .AddField("ver", "0.1debut", inline: true)
+            .AddField("ver", "0.2.5patch", inline: true)
             .Build();
 
         if (!command.HasResponded)
@@ -466,6 +504,12 @@ internal static class SlashOptionReader
     {
         var value = GetOptionValue(command, optionName);
         return value as SocketUser;
+    }
+
+    public static IAttachment? GetAttachment(SocketSlashCommand command, string optionName)
+    {
+        var value = GetOptionValue(command, optionName);
+        return value as IAttachment;
     }
 
     private static object? GetOptionValue(SocketSlashCommand command, string optionName)

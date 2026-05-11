@@ -103,12 +103,10 @@ public static class BotTextNormalizer
 
         output = Regex.Replace(output, @"\\text\s*\{([^{}]+)\}", "$1");
         output = Regex.Replace(output, @"\\(?:quad|qquad|,|;|!)(?![a-zA-Z])", " ");
-        output = output.Replace("\\(", string.Empty, StringComparison.Ordinal)
-            .Replace("\\)", string.Empty, StringComparison.Ordinal)
-            .Replace("\\[", string.Empty, StringComparison.Ordinal)
-            .Replace("\\]", string.Empty, StringComparison.Ordinal)
-            .Replace("$$", string.Empty, StringComparison.Ordinal)
-            .Replace("$", string.Empty, StringComparison.Ordinal);
+        output = Regex.Replace(output, @"\\\((.*?)\\\)", "$1");
+        output = Regex.Replace(output, @"\\\[(.*?)\\\]", "$1", RegexOptions.Singleline);
+        output = Regex.Replace(output, @"\$\$(.*?)\$\$", "$1", RegexOptions.Singleline);
+        output = Regex.Replace(output, @"\$(.*?)\$", "$1");
         output = Regex.Replace(output, @"\s{2,}", " ");
         return output.Trim();
     }
