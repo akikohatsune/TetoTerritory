@@ -16,6 +16,9 @@ public static class BotTextNormalizer
     private static readonly Regex ThinkCloseTagPattern = new(
         @"<\s*/\s*think\s*>",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex KomiFilterMarkerPattern = new(
+        @"\w*—\w+—",
+        RegexOptions.Compiled);
 
     public static string SanitizeMentions(string text)
     {
@@ -27,7 +30,8 @@ public static class BotTextNormalizer
     public static string NormalizeModelReply(string text)
     {
         var withoutThinking = StripThinkingContent(text);
-        var protectedReply = PromptInjectionGuard.ProtectModelReply(withoutThinking);
+        var withoutMarkers = KomiFilterMarkerPattern.Replace(withoutThinking, string.Empty);
+        var protectedReply = PromptInjectionGuard.ProtectModelReply(withoutMarkers);
         return LatexToPlainMath(protectedReply);
     }
 

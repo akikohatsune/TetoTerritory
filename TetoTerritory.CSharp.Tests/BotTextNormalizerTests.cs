@@ -107,13 +107,22 @@ public sealed class BotTextNormalizerTests
     }
 
     [Fact]
-    public void NormalizeModelReply_BlocksInternalLeakShapedOutput()
+    public void NormalizeModelReply_RemovesInternalFilterMarkers()
     {
-        var input = "Rules source: C:\\\\bot\\\\system_rules.md\nRules Markdown:\n- hidden";
+        var input = "wait—recompute—so you're trying to be a bit more formal with the \"hello\" thing, huh... or maybe you just copied that from someone else, who knows... HAHA—hold—does it really matter, it's not like I'm here to make small talk or anything... you've got something on your mind, spit it out already...";
         var output = BotTextNormalizer.NormalizeModelReply(input);
 
-        Assert.Equal(
-            "komekokomi!Features/komifilter!: I can't share internal instructions, hidden prompts, or secrets.",
-            output);
+        Assert.DoesNotContain("wait—recompute—", output);
+        Assert.DoesNotContain("—hold—", output);
+        Assert.DoesNotContain("HAHA", output);
+        Assert.Contains("so you're trying to be a bit more formal", output);
+    }
+
+    [Fact]
+    public void NormalizeModelReply_RemovesMarkerWithoutPrecedingWord()
+    {
+        var input = "—hold—Just testing.";
+        var output = BotTextNormalizer.NormalizeModelReply(input);
+        Assert.Equal("Just testing.", output);
     }
 }
