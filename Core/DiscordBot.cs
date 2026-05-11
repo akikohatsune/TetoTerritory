@@ -552,6 +552,11 @@ public sealed class DiscordBot : IAsyncDisposable
         return _chatMemory.ClearChannelAsync(channelId);
     }
 
+    internal Task ClearAllMemoryAsync()
+    {
+        return _chatMemory.ClearAllAsync();
+    }
+
     internal string BuildProviderStatusMessage()
     {
         return

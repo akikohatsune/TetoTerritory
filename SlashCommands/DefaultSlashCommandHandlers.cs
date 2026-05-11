@@ -74,9 +74,20 @@ internal sealed class ClearMemorySlashCommandHandler : ISlashCommandHandler
 
     public SlashCommandBuilder BuildCommand()
     {
-        return new SlashCommandBuilder()
+        var builder = new SlashCommandBuilder()
             .WithName(_commandName)
-            .WithDescription("Clear short-term memory for this channel.");
+            .WithDescription("Clear short-term memory.");
+
+        if (_commandName == "clearmemo")
+        {
+            builder.AddOption(
+                name: "all",
+                type: ApplicationCommandOptionType.Boolean,
+                description: "Clear short-term memory for ALL channels",
+                isRequired: false);
+        }
+
+        return builder;
     }
 
     public async Task HandleAsync(DiscordBot bot, SocketSlashCommand command)
@@ -86,8 +97,26 @@ internal sealed class ClearMemorySlashCommandHandler : ISlashCommandHandler
             return;
         }
 
-        await bot.ClearChannelMemoryAsync(command.Channel.Id);
-        await bot.RespondSlashAsync(command, "Cleared short-term memory for this channel.", ephemeral: true);
+        var clearAll = false;
+        if (_commandName == "clearmemo")
+        {
+            var allOption = command.Data.Options.FirstOrDefault(o => o.Name == "all")?.Value;
+            if (allOption is bool isAll)
+            {
+                clearAll = isAll;
+            }
+        }
+
+        if (clearAll)
+        {
+            await bot.ClearAllMemoryAsync();
+            await bot.RespondSlashAsync(command, "Cleared short-term memory for all channels.", ephemeral: true);
+        }
+        else
+        {
+            await bot.ClearChannelMemoryAsync(command.Channel.Id);
+            await bot.RespondSlashAsync(command, "Cleared short-term memory for this channel.", ephemeral: true);
+        }
     }
 }
 

@@ -182,6 +182,24 @@ public sealed class ChatMemoryStore
         }
     }
 
+    public async Task ClearAllAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var conn = CreateConnection();
+            await conn.OpenAsync(cancellationToken);
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM chat_memory";
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task ClearChannelAsync(
         ulong channelId,
         string personaKey,

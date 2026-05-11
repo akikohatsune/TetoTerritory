@@ -36,8 +36,16 @@ internal sealed class ChatRuntimeCommandHandler : IDiscordCommandHandler
                     return;
                 }
 
-                await bot.ClearChannelMemoryAsync(message.Channel.Id);
-                await bot.ReplyAsync(message, "Cleared short-term memory for this channel.");
+                if (commandName == "clearmemo" && string.Equals(args.Trim(), "all", StringComparison.OrdinalIgnoreCase))
+                {
+                    await bot.ClearAllMemoryAsync();
+                    await bot.ReplyAsync(message, "Cleared short-term memory for all channels.");
+                }
+                else
+                {
+                    await bot.ClearChannelMemoryAsync(message.Channel.Id);
+                    await bot.ReplyAsync(message, "Cleared short-term memory for this channel.");
+                }
                 return;
 
             case "terminated":
